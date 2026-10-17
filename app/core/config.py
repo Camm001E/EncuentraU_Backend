@@ -1,5 +1,6 @@
 from functools import lru_cache
 from pathlib import Path
+from typing import Literal
 from urllib.parse import urlsplit
 
 from pydantic import Field, SecretStr, field_validator
@@ -16,6 +17,9 @@ class Settings(BaseSettings):
     max_image_size_mb: int = 10
     cors_origins: str = "http://localhost:3000,http://localhost:8080"
     database_url: SecretStr | None = Field(default=None, repr=False)
+    jwt_secret_key: SecretStr | None = Field(default=None, repr=False)
+    jwt_algorithm: Literal["HS256"] = "HS256"
+    access_token_expire_minutes: int = Field(default=60, gt=0)
 
     model_config = SettingsConfigDict(
         env_file=BACKEND_DIR / ".env",
@@ -23,6 +27,15 @@ class Settings(BaseSettings):
         extra="ignore",
         hide_input_in_errors=True,
     )
+
+    @field_validator("jwt_secret_key")
+    @classmethod
+    def validate_jwt_secret_key(cls, value: SecretStr | None) -> SecretStr | None:
+        if value is None or not value.get_secret_value().strip():
+            return None
+        if len(value.get_secret_value().encode("utf-8")) < 32:
+            raise ValueError("JWT_SECRET_KEY debe contener al menos 32 bytes.")
+        return value
 
     @field_validator("database_url")
     @classmethod
