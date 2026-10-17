@@ -1,8 +1,9 @@
 # EncuentraU AI API
 
 API de reconocimiento visual y evaluación de coincidencias entre objetos perdidos
-y encontrados, con PostgreSQL, migraciones y autenticación persistente. El registro
-guarda usuarios reales; análisis y coincidencias todavía no guardan sus resultados.
+y encontrados, con PostgreSQL, migraciones y autenticación persistente. Usuarios y
+reportes se guardan en PostgreSQL, con análisis visual opcional asociado al reporte.
+Analizar una imagen o evaluar una coincidencia por separado no guarda resultados.
 
 ## Funciones incluidas
 
@@ -11,6 +12,7 @@ guarda usuarios reales; análisis y coincidencias todavía no guardan sus result
 - `POST /api/v1/auth/register`: registra un estudiante activo en PostgreSQL.
 - `POST /api/v1/auth/login`: valida credenciales y entrega un JWT.
 - `GET /api/v1/auth/me`: consulta al usuario autenticado.
+- CRUD JWT de reportes propios en `/api/v1/reports`.
 - `POST /api/v1/ai/analyze`: recibe una fotografía y una descripción.
 - `POST /api/v1/matches/evaluate`: compara dos objetos y devuelve evidencias.
 - Validación de JPEG, PNG y WEBP.
@@ -514,6 +516,136 @@ no leen `.env`. La integración PostgreSQL es opcional y solo usa
 `TEST_DATABASE_URL` en una **base aislada de pruebas**, nunca la base normal:
 ejecuta upgrade/downgrade y elimina únicamente su esquema de prueba.
 
-Quedan para fases posteriores los reportes persistentes, análisis y coincidencias
-guardados, recuperación de contraseña, refresh/revocación de tokens, límites de
+Quedan para fases posteriores la conexión de Flutter al CRUD, coincidencias
+guardadas, recuperación de contraseña, refresh/revocación de tokens, límites de
 intentos de login, almacenamiento de imágenes, reclamaciones y chat.
+
+## Reportes persistentes: ejemplos para Postman
+
+Configura variables locales: `base_url=http://127.0.0.1:8000/api/v1`,
+`access_token` con el JWT obtenido del login y `report_id` con el UUID del
+reporte creado. No exportes tokens. En todas las peticiones selecciona
+**Authorization → Bearer Token → {{access_token}}**. POST y PATCH usan
+**Body → raw → JSON**.
+
+### Crear: POST {{base_url}}/reports
+
+```json
+{
+  "report_type": "lost",
+  "object_type": "Audífonos Bluetooth",
+  "category": "electronica",
+  "primary_color": "negro",
+  "secondary_colors": ["azul"],
+  "brand": "JBL",
+  "shape": "Estuche ovalado",
+  "description": "Audífonos negros con detalles azules.",
+  "location": "Cafetería central",
+  "event_date": "2026-10-16",
+  "private_feature": "Detalle que solo conoce el propietario",
+  "analysis": {
+    "extracted_data": {
+      "object_detected": true,
+      "object_type": "Audífonos Bluetooth",
+      "visible_features": ["Estuche ovalado", "Detalle azul"],
+      "image_quality": "buena",
+      "confidence": "alta"
+    },
+    "confidence": "alta"
+  }
+}
+```
+
+Devuelve **201**. `analysis` puede omitirse o ser null. `extracted_data` conserva
+el JSON recibido y `confidence` usa `baja`, `media` o `alta`, como la
+restricción existente en PostgreSQL. El endpoint no vuelve a llamar a Gemini:
+recibe un análisis previo. El proveedor se fija en `gemini` y el modelo sale de
+`settings.gemini_model`; no se aceptan del cliente. Guardar la extracción no
+certifica su procedencia. Se rechazan imágenes binarias, data URIs y rutas locales.
+El JSON admite hasta 64 KiB y profundidad 20. No se guardan fotografías.
+
+La respuesta contiene UUID, `user_id`, tipo, estado, atributos, descripción,
+lugar, fecha, detalle privado, análisis opcional y fechas de auditoría. El análisis
+incluye sus UUID, proveedor, modelo, extracción, confianza y fecha. Reporte y
+análisis se guardan en una sola transacción: cualquier fallo revierte ambos.
+El propietario siempre sale del JWT y el estado inicial siempre es active;
+campos extra como user_id, status o fechas de auditoría devuelven 422.
+
+Los textos se recortan, colapsan espacios y normalizan a Unicode NFC. Tipo,
+categoría y colores pasan a minúsculas; los secundarios se deduplican y omiten el
+primario. Máximos: tipo 200 caracteres, categoría/color/marca 100, forma 500,
+descripción 5000, lugar 300, detalle privado 2000 y 20 colores. Los atributos
+opcionales vacíos se guardan como NULL. La fecha no puede ser futura respecto al
+día actual del servidor.
+
+### Listar: GET {{base_url}}/reports/me?limit=20&offset=0
+
+Filtros: `report_type=lost|found` y `status=active|resolved|cancelled`.
+Límite de 1 a 100, predeterminado 20; offset no negativo. Devuelve **200**:
+
+```json
+{"items": [], "total": 0, "limit": 20, "offset": 0}
+```
+
+Total cuenta los reportes propios que cumplen los filtros antes de paginar.
+Se ordenan por created_at descendente y UUID descendente como desempate.
+Los análisis se cargan por lotes, sin consultas por cada reporte. Sin filtro se
+incluyen los cancelados. No hay rutas públicas de reportes en esta fase.
+
+### Detalle: GET {{base_url}}/reports/{{report_id}}
+
+Devuelve **200** con el mismo contrato de creación. El detalle privado solo se
+expone al propietario. Si existen varios análisis históricos se devuelve el más
+reciente, conservando todos en la base.
+
+### Editar: PATCH {{base_url}}/reports/{{report_id}}
+
+```json
+{"description": "Descripción actualizada", "brand": null}
+```
+
+Devuelve **200**. Se pueden editar atributos, descripción, lugar, fecha, detalle
+privado y estado. Solo reportes actualmente activos pueden cambiar; pasar a
+resolved o cancelled impide cambios posteriores. Los campos omitidos se
+conservan; null solo limpia color primario, marca, forma o detalle privado.
+Un body vacío o null en campos obligatorios devuelve 422. UUID, propietario,
+tipo lost/found, auditoría y análisis histórico son inmutables. La fila se bloquea
+y se comprueba su versión para evitar sobreescribir cambios concurrentes.
+
+### Cancelar: DELETE {{base_url}}/reports/{{report_id}}
+
+Devuelve **204**, sin body. Cambia status a cancelled y actualiza updated_at.
+Conserva físicamente el reporte, sus análisis y coincidencias. El detalle y listado
+propios siguen disponibles. Cancelar o editar un reporte no activo devuelve 409.
+
+| HTTP | Motivo |
+| --- | --- |
+| 401 | JWT ausente, inválido, modificado o expirado. |
+| 403 | Usuario inactivo. |
+| 404 | Reporte ajeno o inexistente; respuesta idéntica. |
+| 409 | Reporte no activo o modificado por otra petición. |
+| 422 | Body, UUID, fecha, filtros o paginación inválidos; campos extra. |
+| 503 | Persistencia no disponible; mensaje controlado sin SQL ni credenciales. |
+
+El dominio y aplicación no importan FastAPI, SQLAlchemy ni infraestructura.
+Autenticación y reportes comparten una sesión por petición, que siempre se cierra.
+Se devuelven schemas explícitos, no modelos ORM. Se usan los modelos y migración
+0001 existentes sin modificar el esquema.
+
+### Integración PostgreSQL aislada
+
+Las pruebas nuevas requieren `TEST_DATABASE_URL` en el entorno del proceso,
+con `_test` en el nombre de una base PostgreSQL temporal independiente.
+No leen .env. Cada prueba crea y retira su propio esquema y usa JWT reales.
+No consumen Gemini. Sin esa variable se omiten explícitamente.
+
+```powershell
+python -m ruff format --check .
+python -m ruff check .
+python -m pytest -ra
+```
+
+La suite completa incluye upgrade/downgrade y comprobaciones de Alembic:
+nunca apuntes TEST_DATABASE_URL a la base normal de desarrollo. Ejecuta
+`python -m alembic check` contra la base aislada migrada para confirmar ausencia
+de cambios de esquema. No hace falta crear una migración nueva.
