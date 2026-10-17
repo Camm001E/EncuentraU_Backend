@@ -29,7 +29,7 @@ class SQLAlchemyObjectReportRepository:
         self.session = session
 
     @staticmethod
-    def _to_report(model: ReportModel) -> ObjectReport:
+    def to_domain(model: ReportModel) -> ObjectReport:
         latest = max(
             model.analyses, key=lambda item: (item.created_at, item.id), default=None
         )
@@ -83,7 +83,7 @@ class SQLAlchemyObjectReportRepository:
         try:
             self.session.add(model)
             self.session.flush()
-            result = self._to_report(model)
+            result = self.to_domain(model)
             self.session.commit()
             return result
         except SQLAlchemyError:
@@ -100,7 +100,7 @@ class SQLAlchemyObjectReportRepository:
                 .where(ReportModel.id == report_id, ReportModel.user_id == user_id)
                 .options(selectinload(ReportModel.analyses))
             )
-            return self._to_report(model) if model is not None else None
+            return self.to_domain(model) if model is not None else None
         except SQLAlchemyError:
             self.session.rollback()
             raise ReportPersistenceError from None
@@ -132,7 +132,7 @@ class SQLAlchemyObjectReportRepository:
                 .options(selectinload(ReportModel.analyses))
             ).all()
             return ReportPage(
-                items=tuple(self._to_report(model) for model in models),
+                items=tuple(self.to_domain(model) for model in models),
                 total=total,
                 limit=limit,
                 offset=offset,
@@ -170,7 +170,7 @@ class SQLAlchemyObjectReportRepository:
             model.updated_at = func.now()
             self.session.flush()
             self.session.refresh(model, attribute_names=["updated_at"])
-            result = self._to_report(model)
+            result = self.to_domain(model)
             self.session.commit()
             return result
         except SQLAlchemyError:

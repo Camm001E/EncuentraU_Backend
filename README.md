@@ -2,7 +2,8 @@
 
 API de reconocimiento visual y evaluación de coincidencias entre objetos perdidos
 y encontrados, con PostgreSQL, migraciones y autenticación persistente. Usuarios y
-reportes se guardan en PostgreSQL, con análisis visual opcional asociado al reporte.
+reportes y coincidencias generadas se guardan en PostgreSQL, con análisis visual
+opcional asociado al reporte.
 Analizar una imagen o evaluar una coincidencia por separado no guarda resultados.
 
 ## Funciones incluidas
@@ -15,6 +16,9 @@ Analizar una imagen o evaluar una coincidencia por separado no guarda resultados
 - CRUD JWT de reportes propios en `/api/v1/reports`.
 - `POST /api/v1/ai/analyze`: recibe una fotografía y una descripción.
 - `POST /api/v1/matches/evaluate`: compara dos objetos y devuelve evidencias.
+- `POST /api/v1/reports/{report_id}/matches/generate`: genera coincidencias persistentes.
+- `GET /api/v1/matches/me`: lista coincidencias propias con paginación y filtros.
+- `GET /api/v1/matches/{match_id}`: consulta una coincidencia como participante.
 - Validación de JPEG, PNG y WEBP.
 - Límite configurable de tamaño.
 - Análisis con Gemini mediante el SDK oficial `google-genai`.
@@ -516,8 +520,8 @@ no leen `.env`. La integración PostgreSQL es opcional y solo usa
 `TEST_DATABASE_URL` en una **base aislada de pruebas**, nunca la base normal:
 ejecuta upgrade/downgrade y elimina únicamente su esquema de prueba.
 
-Quedan para fases posteriores la conexión de Flutter al CRUD, coincidencias
-guardadas, recuperación de contraseña, refresh/revocación de tokens, límites de
+Quedan para fases posteriores la conexión de Flutter a reportes y coincidencias,
+recuperación de contraseña, refresh/revocación de tokens, límites de
 intentos de login, almacenamiento de imágenes, reclamaciones y chat.
 
 ## Reportes persistentes: ejemplos para Postman
@@ -629,8 +633,9 @@ propios siguen disponibles. Cancelar o editar un reporte no activo devuelve 409.
 
 El dominio y aplicación no importan FastAPI, SQLAlchemy ni infraestructura.
 Autenticación y reportes comparten una sesión por petición, que siempre se cierra.
-Se devuelven schemas explícitos, no modelos ORM. Se usan los modelos y migración
-0001 existentes sin modificar el esquema.
+Se devuelven schemas explícitos, no modelos ORM. El CRUD usa las tablas de la
+migración 0001; la orquestación de coincidencias añade únicamente su updated_at
+mediante 0002, sin cambiar el esquema de reportes o análisis.
 
 ### Integración PostgreSQL aislada
 
@@ -648,4 +653,106 @@ python -m pytest -ra
 La suite completa incluye upgrade/downgrade y comprobaciones de Alembic:
 nunca apuntes TEST_DATABASE_URL a la base normal de desarrollo. Ejecuta
 `python -m alembic check` contra la base aislada migrada para confirmar ausencia
-de cambios de esquema. No hace falta crear una migración nueva.
+de cambios de esquema una vez aplicadas las migraciones existentes.
+
+## Coincidencias persistentes y autenticadas
+
+La generación usa los reportes guardados y su último análisis (por created_at y
+UUID como desempate). Nunca llama nuevamente a Gemini. Se conservan sin cambios
+`POST /api/v1/matches/evaluate`, autenticación, análisis visual y CRUD de reportes.
+
+### Preparación del esquema
+
+La tabla original object_matches no tenía updated_at. La migración adicional
+`0002_match_updated_at` incorpora ese campo obligatorio para conocer el último
+recálculo. En parejas existentes lo inicializa con created_at y conserva todos
+los registros, claves, factores y restricciones. No modifica 0001.
+
+Con la configuración local ya preparada, aplica el upgrade antes de usar las
+nuevas rutas. No necesitas variables adicionales:
+
+```powershell
+python -m alembic upgrade head
+python -m alembic current
+python -m alembic check
+```
+
+La revisión actual será `0002_match_updated_at`. Downgrade solo se prueba en
+PostgreSQL temporal aislado; nunca en la base normal.
+
+### Generar: POST {{base_url}}/reports/{{report_id}}/matches/generate
+
+En Postman usa **Authorization → Bearer Token → {{access_token}}**, sin body.
+Devuelve 200 con `report_id`, `total` e `items`, que contienen las coincidencias
+persistidas del reporte tras sincronizar. Una generación sin candidatos devuelve
+`total: 0` e `items: []`. Las parejas aceptadas o rechazadas siguen incluidas como
+histórico, aunque el recálculo ya no las considere suficientes.
+
+- El reporte fuente debe ser propio y active. Ajeno o inexistente: 404;
+  no activo: 409; JWT inválido: 401; usuario inactivo: 403.
+- Solo compara lost con found activos, de usuarios distintos, con hallazgo entre
+  la fecha de pérdida y 14 días después, ambos límites incluidos.
+- Los campos declarados por el usuario tienen prioridad. Color primario,
+  secundarios, marca y forma se complementan desde extracted_data cuando faltan.
+  visible_features y visible_text se toman del análisis; tipos incorrectos o
+  valores visuales excesivos se ignoran. Sin análisis, se usa la evidencia declarada.
+- Todas las métricas y evidencias proceden exclusivamente de MatchingService,
+  sin ajustes de pesos o umbrales. MatchableObject admite descripciones de hasta
+  5000 caracteres, igual que el CRUD, para evitar truncarlas.
+- Se guardan resultados compatibles, high o possible, con porcentaje mínimo 60.
+  lost_report_id siempre identifica la pérdida y found_report_id el hallazgo.
+- Repetir actualiza métricas, factores, warnings y updated_at de parejas pending,
+  conservando UUID y created_at. No duplica la pareja gracias a la restricción
+  única y al upsert PostgreSQL condicionado a pending.
+- Se retiran únicamente las parejas pending de ese reporte que dejan de cumplir
+  las reglas, incluso si el candidato fue cancelado o cambió de fecha. Nunca se
+  actualizan ni eliminan las accepted o rejected. No se añaden rutas de decisión
+  o reclamación en esta fase.
+
+La generación completa se confirma en una transacción; cualquier fallo revierte
+inserciones, actualizaciones y limpieza. Comparte la sesión de la autenticación,
+que se cierra al terminar la petición. Un bloqueo advisory de transacción
+serializa generaciones concurrentes desde ambos extremos de una pareja. Las filas
+de reportes se bloquean mientras se evalúan para evitar cambios durante el cálculo.
+El bloqueo se libera al hacer commit o rollback, según la
+[documentación de PostgreSQL](https://www.postgresql.org/docs/17/functions-admin.html#FUNCTIONS-ADVISORY-LOCKS).
+Esta versión prioriza consistencia: un volumen elevado de generaciones requerirá
+revisar ese bloqueo global y el procesamiento síncrono de candidatos.
+
+El upsert usa la restricción existente y la condición de estado descritas en la
+[documentación de SQLAlchemy](https://docs.sqlalchemy.org/en/20/dialects/postgresql.html#insert-on-conflict-upsert).
+La aplicación establece updated_at explícitamente en el recálculo.
+
+### Listar: GET {{base_url}}/matches/me?limit=20&offset=0
+
+Requiere Bearer JWT. Filtros opcionales:
+`level=high|possible|low` y `status=pending|accepted|rejected`.
+Limit de 1 a 100, predeterminado 20; offset no negativo. Devuelve 200 con
+`items`, `total`, `limit` y `offset`; total se calcula antes de paginar.
+Orden: porcentaje descendente, created_at descendente y UUID descendente como
+desempate. Solo aparecen parejas donde el usuario posee alguno de los reportes.
+
+### Detalle: GET {{base_url}}/matches/{{match_id}}
+
+Devuelve 200 al participante o 404 indistinguible para pareja ajena o inexistente.
+Cada elemento de generación, listado y detalle presenta:
+
+- id, percentage, identity_percentage, context_percentage y evidence_coverage.
+- compatible, level, status, factors, warnings, created_at y updated_at.
+- my_report y candidate_report, orientados al usuario que consulta.
+
+Los resúmenes incluyen solo UUID del reporte, report_type, status, object_type,
+category, primary_color, secondary_colors, brand, shape, description, location y
+event_date. No contienen private_feature, user_id, datos de autenticación,
+identidad personal del otro usuario ni extracción JSON. Factores y warnings
+conservan únicamente las evidencias explicables del motor.
+
+Filtros, paginación y UUID inválidos devuelven 422, sin repetir el input en el
+error. Los fallos de persistencia devuelven 503 con mensaje controlado sin SQL ni
+credenciales. Las consultas cargan los resúmenes en un join y los análisis de
+candidatos por lotes, evitando consultas por cada pareja.
+
+Las pruebas de orquestación usan los fixtures de fotografías ya guardados y una
+base PostgreSQL temporal con `_test` en su nombre. Cubren concurrencia, idempotencia,
+rollback tras escrituras y limpieza, privacidad, reglas temporales, estados
+protegidos y upgrade de datos existentes. No consumen Gemini ni la base normal.
