@@ -2,6 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.routes.ai import router as ai_router
+from app.api.routes.database import router as database_router
 from app.api.routes.matches import router as matches_router
 from app.core.config import get_settings
 
@@ -34,6 +35,7 @@ def create_app() -> FastAPI:
 
     app.include_router(ai_router, prefix=settings.api_prefix)
     app.include_router(matches_router, prefix=settings.api_prefix)
+    app.include_router(database_router)
     return app
 
 

@@ -1,11 +1,14 @@
 # EncuentraU AI API
 
 API de reconocimiento visual y evaluación de coincidencias entre objetos perdidos
-y encontrados, sin persistencia por ahora.
+y encontrados, con infraestructura PostgreSQL y migraciones. Los endpoints de
+análisis y coincidencias todavía no guardan datos; los endpoints persistentes se
+implementarán en la siguiente fase.
 
 ## Funciones incluidas
 
 - `GET /health`: comprueba que el servidor está disponible.
+- `GET /health/database`: comprueba la conexión con PostgreSQL.
 - `POST /api/v1/ai/analyze`: recibe una fotografía y una descripción.
 - `POST /api/v1/matches/evaluate`: compara dos objetos y devuelve evidencias.
 - Validación de JPEG, PNG y WEBP.
@@ -16,7 +19,7 @@ y encontrados, sin persistencia por ahora.
 
 ## 1. Preparar el entorno
 
-Desde la carpeta `backend`:
+Desde la raíz del repositorio `EncuentraU_Backend`:
 
 ```bash
 python -m venv .venv
@@ -39,7 +42,8 @@ pip install -r requirements-dev.txt
 ## 2. Configurar Gemini
 
 1. Crea una clave gratuita en Google AI Studio.
-2. Copia `.env.example` como `.env`.
+2. Solo si no existe `.env`, copia `.env.example` como punto de partida. Si ya
+   existe, conserva su contenido y agrega manualmente las variables faltantes.
 3. Reemplaza el valor de `GEMINI_API_KEY`.
 
 El archivo `.env` está ignorado por Git y no debe publicarse.
@@ -251,3 +255,139 @@ Los metadatos `object_detected`, `image_quality`, `confidence`,
 Si Gemini no detecta un objeto o pide otra foto, revisa el análisis antes de
 evaluar coincidencias. Las pruebas del motor usan datos controlados y no validan
 el reconocimiento de fotografías reales.
+
+## Base técnica de PostgreSQL
+
+La infraestructura está en `app/infrastructure/database/`: base declarativa,
+modelos SQLAlchemy 2, engine con psycopg 3 y fábrica de sesiones. El dominio no
+importa SQLAlchemy. El engine y las sesiones se crean bajo demanda; importar la
+aplicación no abre conexiones ni crea tablas automáticamente.
+
+La dependencia `get_session` entrega una sesión por petición y siempre la cierra,
+también ante excepciones. El cierre revierte trabajo sin confirmar; los futuros
+casos de uso deberán decidir explícitamente cuándo hacer `commit`.
+
+### Tablas y relaciones
+
+| Tabla | Contenido y restricciones |
+| --- | --- |
+| `users` | UUID; nombre; email y código estudiantil únicos; hash de contraseña, rol, estado activo y fechas de creación/actualización. |
+| `object_reports` | UUID; propietario, tipo `lost/found`, estado, atributos del objeto, descripción, lugar, fecha y característica privada. |
+| `image_analyses` | UUID; reporte, proveedor, modelo, extracción JSONB, confianza y fecha de creación. |
+| `object_matches` | UUID; pareja lost/found única, métricas, compatibilidad, nivel, factores JSONB, advertencias JSONB, estado y fecha de creación. |
+
+```mermaid
+erDiagram
+    users ||--o{ object_reports : reports
+    object_reports ||--o{ image_analyses : analyses
+    object_reports ||--o{ object_matches : lost_report
+    object_reports ||--o{ object_matches : found_report
+```
+
+Todos los identificadores son UUID generados por la aplicación. Las fechas de
+auditoría usan timestamps con zona horaria y valor inicial del servidor.
+`updated_at` se actualiza mediante SQLAlchemy al modificar un registro; una
+actualización SQL externa debe mantenerlo explícitamente.
+
+Los porcentajes están limitados a 0–100. Las métricas de identidad, contexto y
+cobertura tienen dos decimales. Una pareja no puede relacionar un reporte
+consigo mismo; si `compatible` es falso, el nivel debe ser `low` y el porcentaje
+no puede superar 29. Las claves foráneas garantizan la existencia de los reportes;
+la validación de que cada uno tenga el tipo lost/found correcto queda para los
+futuros casos de uso persistentes.
+
+No se permite borrar un usuario con reportes. Al borrar un reporte se eliminan
+sus análisis y coincidencias mediante claves foráneas con `ON DELETE CASCADE`.
+Los atributos visuales desconocidos y `private_feature` admiten NULL.
+No hay columnas binarias ni almacenamiento de fotografías; las referencias a
+imágenes se añadirán en una fase posterior.
+
+Decisiones iniciales de estados:
+
+- Roles: `student`, `admin`.
+- Reportes: `active`, `resolved`, `cancelled`.
+- Coincidencias: `pending`, `accepted`, `rejected`.
+- Confianza visual: `baja`, `media`, `alta`, como en el contrato de Gemini.
+
+La unicidad de email y código se aplica sobre sus valores almacenados. La
+normalización de email y la política de roles se completarán con autenticación.
+
+### Configuración local
+
+Agrega manualmente estas variables a tu `.env` existente, usando `.env.example`
+como referencia y conservando las variables de Gemini:
+
+- `POSTGRES_DB`
+- `POSTGRES_USER`
+- `POSTGRES_PASSWORD`
+- `POSTGRES_PORT`
+- `DATABASE_URL`
+
+El ejemplo contiene únicamente valores de muestra. `DATABASE_URL` debe apuntar
+al mismo usuario, contraseña, puerto y base definidos para Docker, con el esquema
+`postgresql+psycopg`. También se acepta `postgresql` y se selecciona psycopg 3.
+Si la contraseña contiene caracteres reservados, debe codificarse para una URL.
+
+La URL se guarda como `SecretStr`, se oculta en la representación de Settings y
+los errores de configuración no imprimen sus valores. El engine desactiva el
+registro de SQL y oculta parámetros. No imprimas la URL ni la configuración
+expandida de Compose.
+
+Antes de iniciar el servicio, comprueba que Docker y su daemon estén disponibles:
+
+```powershell
+docker version
+docker compose version
+docker compose config --quiet
+docker compose up -d --wait
+python -m alembic upgrade head
+```
+
+El Compose usa PostgreSQL 17, publica el puerto únicamente en `127.0.0.1`, obtiene
+variables de `.env`, incorpora un healthcheck y conserva los datos en el volumen
+nombrado `postgres_data`. Las variables de inicialización de PostgreSQL solo se
+aplican al crear un volumen vacío; cambiarlas después no modifica las credenciales
+de una base existente. La imagen y su configuración se describen en la
+[documentación oficial de PostgreSQL para Docker](https://hub.docker.com/_/postgres).
+
+La revisión inicial de Alembic es `0001_postgresql_foundation`. Crea las cuatro
+tablas, índices, claves y restricciones; no depende de `create_all` ni de las
+credenciales incluidas en un archivo versionado. Alembic utiliza la configuración
+en memoria y no escribe `DATABASE_URL` en `alembic.ini`.
+
+Si PowerShell bloquea la activación del entorno, usa directamente
+`.\.venv\Scripts\python.exe` en lugar de `python`, sin cambiar la política del
+sistema. Reinicia Uvicorn después de configurar las variables.
+
+### Disponibilidad y pruebas
+
+`GET /health/database` ejecuta `SELECT 1`: devuelve HTTP 200 con
+`{"status":"ok","database":"postgresql"}` o HTTP 503 con
+`{"detail":"La base de datos no está disponible."}`. Si `DATABASE_URL` no está
+configurada, devuelve 503; `/health`, `/api/v1/ai/analyze` y
+`/api/v1/matches/evaluate` mantienen su funcionamiento independiente.
+
+```powershell
+python -m ruff format .
+python -m ruff check .
+python -m pytest
+```
+
+Las pruebas no cargan `.env`. Las pruebas unitarias de metadatos y restricciones
+usan SQLite en memoria, y también generan SQL de PostgreSQL sin conectarse.
+Para ejecutar la integración real, define `TEST_DATABASE_URL` únicamente en el
+entorno del proceso, apuntando a una base de prueba PostgreSQL, y ejecuta:
+
+```powershell
+python -m pytest -m postgresql
+```
+
+La integración crea un esquema con UUID, aplica y revierte migraciones, vuelve
+a aplicarlas, verifica ausencia de cambios pendientes de Alembic, prueba
+restricciones y JSONB y comprueba el health real. Solo elimina el esquema que
+acaba de crear. Requiere permisos para crear esquemas en esa base de prueba.
+Si la variable no está definida, esa prueba se omite de forma explícita.
+
+En esta fase no se implementan CRUD, login/JWT, almacenamiento de imágenes,
+reclamaciones ni chat. La persistencia aún no está conectada a los endpoints de
+análisis y coincidencias.
