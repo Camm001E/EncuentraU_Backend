@@ -1,0 +1,40 @@
+{
+  "lost": {
+    "object_type": "audífonos de diadema",
+    "category": "electronica",
+    "primary_color": "negro",
+    "secondary_colors": [
+      "azul"
+    ],
+    "brand": null,
+    "shape": "arqueada",
+    "visible_features": [
+      "almohadillas acolchadas",
+      "diadema ajustable",
+      "detalles azules en las copas"
+    ],
+    "visible_text": [],
+    "location": "Cafetería central",
+    "event_date": "2026-10-16",
+    "description": "Perdí unos audífonos negros en la cafetería central."
+  },
+  "found": {
+    "object_type": "audifonos de diadema",
+    "category": "electronica",
+    "primary_color": "negro",
+    "secondary_colors": [
+      "rojo"
+    ],
+    "brand": null,
+    "shape": "arqueada",
+    "visible_features": [
+      "almohadillas acolchadas",
+      "diadema ajustable",
+      "detalles en rojo en las uniones"
+    ],
+    "visible_text": [],
+    "location": "Cafetería central",
+    "event_date": "2026-10-16",
+    "description": "Encontré unos audífonos negros con detalles rojos en la cafetería central."
+  }
+}

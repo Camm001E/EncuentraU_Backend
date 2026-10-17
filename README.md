@@ -94,10 +94,12 @@ atributos antes de guardarlos.
 
 ## Motor de coincidencias
 
-`POST /api/v1/matches/evaluate` recibe JSON con `lost` y `found`. Los campos de
-cada objeto son opcionales; si faltan datos, el factor correspondiente aporta cero
-puntos y se marca como `unknown`. Se rechazan campos adicionales y fechas inválidas
-con HTTP 422.
+`POST /api/v1/matches/evaluate` recibe JSON con `lost` y `found`. Conserva el
+contrato de entrada anterior. Los atributos de cada objeto son opcionales; si no
+son comparables, se marcan como `unknown` y se excluyen del máximo evaluable.
+Los valores vacíos y marcadores como `desconocido`, `sin marca` y `no visible`
+tampoco son evidencia. Se rechazan campos adicionales y fechas inválidas con
+HTTP 422.
 
 Ejemplo para Postman (`Content-Type: application/json`):
 
@@ -132,39 +134,115 @@ Ejemplo para Postman (`Content-Type: application/json`):
 }
 ```
 
-Este ejemplo devuelve `percentage: 100`, `level: "high"`, ocho `factors` y una
-lista vacía de `warnings`. Cada factor contiene `name`, `label`, `weight`, `score`,
-`status` (`match`, `partial`, `different` o `unknown`) y `explanation`.
+El ejemplo devuelve este resumen, además de nueve `factors` y `warnings`:
 
-| Factor | Puntos máximos | Comparación |
-| --- | ---: | --- |
-| Tipo de objeto | 20 | Palabras normalizadas y sinónimos explícitos |
-| Categoría | 10 | Igualdad del texto normalizado |
-| Color | 12 | Principal igual: 100%; coincidencia entre colores secundarios: 50% |
-| Marca | 12 | Igualdad del texto normalizado |
-| Características visuales | 18 | Palabras de forma, rasgos visibles y texto visible |
-| Lugar | 12 | Palabras compartidas |
-| Fecha | 6 | Misma fecha: 100%; 1–3 días: 75%; 4–7: 50%; 8–14: 25% |
-| Descripción | 10 | Palabras compartidas |
+```json
+{
+  "percentage": 100,
+  "identity_percentage": 100,
+  "context_percentage": 100,
+  "evidence_coverage": 95.2,
+  "compatible": true,
+  "level": "high"
+}
+```
 
-Las comparaciones por palabras usan intersección dividida por unión (Jaccard),
-omiten artículos y preposiciones y normalizan mayúsculas, tildes y puntuación.
-Hay un vocabulario pequeño y explícito para auriculares/audífonos,
-Bluetooth/inalámbricos y variantes de algunos colores. No se hace inferencia
-semántica ni se llama a Gemini desde este endpoint.
+### Modelo jerárquico
 
-`percentage` es la suma redondeada de los puntos de los factores; los puntos
-ausentes no se redistribuyen. Es una puntuación de evidencias, no una probabilidad
-calibrada de identidad. Los niveles son `high` desde 85, `possible` desde 65 y
-`low` por debajo de 65. Para obtener `high`, además debe coincidir el tipo de
-objeto y no puede haber contradicciones de tipo, categoría o marca. Un hallazgo
-anterior a la pérdida tampoco puede ser `high`. Por eso, una marca contradictoria
-con todos los demás campos iguales devuelve 88 puntos y nivel `possible`.
+La identidad aporta el 80% del resultado y el contexto aporta el 20%. Los pesos
+internos de cada grupo suman 100:
 
-Una fecha anterior a la pérdida o más de 14 días después aporta cero puntos.
-Valores vacíos o marcadores como `desconocido`, `sin marca` y `no visible` no
-cuentan como evidencia, aunque se repitan en ambos objetos. Las coincidencias
-parciales y las contradicciones quedan visibles en los factores.
+| Grupo | Factor | Peso interno |
+| --- | --- | ---: |
+| Identidad | Tipo de objeto | 25 |
+| Identidad | Categoría | 5 |
+| Identidad | Color | 15 |
+| Identidad | Marca | 10 |
+| Identidad | Forma | 10 |
+| Identidad | Rasgos visuales | 20 |
+| Identidad | Descripción del objeto | 15 |
+| Contexto | Lugar | 60 |
+| Contexto | Fecha | 40 |
+
+```text
+identity_percentage = puntos_identidad / peso_identidad_evaluable × 100
+context_percentage = puntos_contexto / peso_contexto_evaluable × 100
+percentage = identity_percentage × 0,80 + context_percentage × 0,20
+
+evidence_coverage = (peso_identidad_evaluable / 100 × 0,80
+                  + peso_contexto_evaluable / 100 × 0,20) × 100
+```
+
+Un grupo sin evidencia tiene porcentaje cero; su participación no se transfiere
+al otro grupo. `percentage` se redondea al entero más cercano al terminar el
+cálculo. Identidad, contexto y cobertura se devuelven con hasta dos decimales.
+Los puntos de cada factor se conservan con dos decimales y son los que se usan
+para calcular los porcentajes de los grupos. Es una puntuación de evidencias,
+no una probabilidad calibrada de que se trate del mismo objeto.
+
+La cobertura indica cuánto del modelo pudo evaluarse, independientemente del
+resultado de las comparaciones. Por ejemplo, si solo falta la marca, la
+identidad tiene 90 puntos evaluables y el contexto 100: la cobertura es 92%.
+Una marca distinta y legible aporta cero puntos, pero sí entra en el denominador.
+
+Cada factor contiene `name`, `group` (`identity` o `context`), `label`, `weight`,
+`evaluable_weight`, `score`, `status` y `explanation`. `weight` es su peso interno
+máximo; `evaluable_weight` indica cuánto se pudo comparar. `score` representa
+puntos dentro del grupo, no una contribución directa al porcentaje final.
+Los estados siguen siendo `match`, `partial`, `different` y `unknown`.
+
+### Reglas de comparación
+
+- Las comparaciones por palabras usan intersección dividida por unión (Jaccard).
+  Se normalizan mayúsculas, tildes y puntuación, y se omiten artículos y
+  preposiciones. Hay equivalencias explícitas para singular/plural y variantes
+  como auriculares/audífonos, Bluetooth/inalámbricos, copa/copas,
+  almohadilla/almohadillas y acolchado/acolchada/acolchados/acolchadas.
+- Categoría y marca requieren igualdad del texto normalizado.
+- El color principal representa el 60% del factor; los conjuntos de colores
+  secundarios se comparan con Jaccard para el 40% restante. Si los secundarios
+  no se pueden comparar, solo se evalúan los 9 puntos del principal. Si solo
+  se conocen los secundarios, se evalúan sus 6 puntos. Los componentes ausentes
+  reducen la cobertura y no se registran como diferencias. Por eso el ejemplo
+  anterior, sin secundarios comparables, tiene cobertura de 95,2%. Dos conjuntos
+  secundarios conocidos y disjuntos generan una advertencia.
+- La forma tiene su propio factor. Los rasgos y el texto visible se comparan
+  como características independientes: cada una busca su mejor correspondencia
+  por palabras en el otro objeto y se promedian ambas direcciones. Se eliminan
+  duplicados y se conserva la simetría; juntar palabras de distintos atributos
+  no equivale a describir el mismo rasgo.
+- La descripción excluye los tokens de ambos lugares y palabras de reporte
+  como perdí, perdido, encontré, encontrado, hallado y extraviado, con sus
+  variantes. Una descripción que solo contiene esos datos queda como `unknown`.
+- El lugar usa similitud de palabras. La fecha aporta 100% si es el mismo día;
+  75% entre 1 y 3 días después; 50% entre 4 y 7; 25% entre 8 y 14. Un hallazgo
+  anterior a la pérdida o posterior a los 14 días aporta cero y sigue siendo
+  evaluable. Las fechas invertidas generan una advertencia.
+
+### Compatibilidad y niveles
+
+Si la similitud del tipo de objeto es menor a 0,35, `compatible` es `false`, se
+añade una advertencia y el porcentaje se limita a 29, con nivel `low`. Los
+porcentajes de identidad y contexto conservan sus valores para explicar el
+resultado anterior al límite. El mismo lugar y fecha no pueden superar esta
+regla.
+
+Si el tipo no se puede comparar, no se afirma una incompatibilidad: `compatible`
+indica ausencia de incompatibilidad conocida. La falta de tipo se muestra en
+los factores, las advertencias y la cobertura. Una cobertura reducida requiere
+interpretar el porcentaje con esa limitación.
+
+Los niveles usan el porcentaje final redondeado:
+
+- `high`: al menos 85 y compatible.
+- `possible`: al menos 60 y compatible.
+- `low`: cualquier otro caso.
+
+Las pruebas de `tests/fixtures/matching/` conservan los tres cuerpos originales
+obtenidos de los análisis de Gemini: mismo objeto desde otro ángulo, objeto
+parecido y objeto diferente. En todos se fijó deliberadamente el mismo lugar y
+la fecha `2026-10-16`. Las pruebas reproducen esas entradas sin enviar imágenes
+ni consumir nuevas llamadas a Gemini.
 
 Para comparar análisis reales, copia únicamente los atributos del objeto desde
 `/api/v1/ai/analyze` y añade `location`, `event_date` y `description` del reporte.
