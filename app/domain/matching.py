@@ -47,7 +47,7 @@ class MatchableObject(BaseModel):
     visible_text: list[str] = Field(default_factory=list, max_length=50)
     location: str | None = Field(default=None, max_length=300)
     event_date: date | None = None
-    description: str | None = Field(default=None, max_length=2000)
+    description: str | None = Field(default=None, max_length=5000)
 
 
 class MatchRequest(BaseModel):
