@@ -15,10 +15,16 @@ class MatchFactorName(StrEnum):
     CATEGORY = "category"
     COLOR = "color"
     BRAND = "brand"
+    SHAPE = "shape"
     VISUAL_FEATURES = "visual_features"
     LOCATION = "location"
     DATE = "date"
     DESCRIPTION = "description"
+
+
+class MatchFactorGroup(StrEnum):
+    IDENTITY = "identity"
+    CONTEXT = "context"
 
 
 class MatchFactorStatus(StrEnum):
@@ -55,8 +61,14 @@ class MatchFactor(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     name: MatchFactorName
+    group: MatchFactorGroup
     label: str
     weight: int = Field(ge=0, le=100)
+    evaluable_weight: float = Field(
+        ge=0,
+        le=100,
+        description="Peso interno respaldado por datos comparables en ambos objetos.",
+    )
     score: float = Field(ge=0, le=100)
     status: MatchFactorStatus
     explanation: str
@@ -66,6 +78,12 @@ class MatchEvaluation(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     percentage: int = Field(ge=0, le=100)
+    identity_percentage: float = Field(ge=0, le=100)
+    context_percentage: float = Field(ge=0, le=100)
+    evidence_coverage: float = Field(
+        ge=0, le=100, description="Porcentaje del modelo que se pudo evaluar."
+    )
+    compatible: bool
     level: MatchLevel
     factors: list[MatchFactor]
     warnings: list[str] = Field(default_factory=list)
