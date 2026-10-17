@@ -1,14 +1,16 @@
 # EncuentraU AI API
 
 API de reconocimiento visual y evaluación de coincidencias entre objetos perdidos
-y encontrados, con infraestructura PostgreSQL y migraciones. Los endpoints de
-análisis y coincidencias todavía no guardan datos; los endpoints persistentes se
-implementarán en la siguiente fase.
+y encontrados, con PostgreSQL, migraciones y autenticación persistente. El registro
+guarda usuarios reales; análisis y coincidencias todavía no guardan sus resultados.
 
 ## Funciones incluidas
 
 - `GET /health`: comprueba que el servidor está disponible.
 - `GET /health/database`: comprueba la conexión con PostgreSQL.
+- `POST /api/v1/auth/register`: registra un estudiante activo en PostgreSQL.
+- `POST /api/v1/auth/login`: valida credenciales y entrega un JWT.
+- `GET /api/v1/auth/me`: consulta al usuario autenticado.
 - `POST /api/v1/ai/analyze`: recibe una fotografía y una descripción.
 - `POST /api/v1/matches/evaluate`: compara dos objetos y devuelve evidencias.
 - Validación de JPEG, PNG y WEBP.
@@ -264,8 +266,8 @@ importa SQLAlchemy. El engine y las sesiones se crean bajo demanda; importar la
 aplicación no abre conexiones ni crea tablas automáticamente.
 
 La dependencia `get_session` entrega una sesión por petición y siempre la cierra,
-también ante excepciones. El cierre revierte trabajo sin confirmar; los futuros
-casos de uso deberán decidir explícitamente cuándo hacer `commit`.
+también ante excepciones. El cierre revierte trabajo sin confirmar. El repositorio
+de usuarios confirma cada registro de forma atómica y ejecuta rollback si falla.
 
 ### Tablas y relaciones
 
@@ -309,8 +311,9 @@ Decisiones iniciales de estados:
 - Coincidencias: `pending`, `accepted`, `rejected`.
 - Confianza visual: `baja`, `media`, `alta`, como en el contrato de Gemini.
 
-La unicidad de email y código se aplica sobre sus valores almacenados. La
-normalización de email y la política de roles se completarán con autenticación.
+La unicidad de email y código se aplica sobre sus valores almacenados. El registro
+normaliza email a minúsculas y código a mayúsculas antes de consultar y guardar.
+Las escrituras SQL externas deben respetar esa misma normalización.
 
 ### Configuración local
 
@@ -384,10 +387,133 @@ python -m pytest -m postgresql
 
 La integración crea un esquema con UUID, aplica y revierte migraciones, vuelve
 a aplicarlas, verifica ausencia de cambios pendientes de Alembic, prueba
-restricciones y JSONB y comprueba el health real. Solo elimina el esquema que
+restricciones y JSONB, registra un usuario, inicia sesión y consulta `/auth/me`.
+También comprueba el health real. Solo elimina el esquema que
 acaba de crear. Requiere permisos para crear esquemas en esa base de prueba.
 Si la variable no está definida, esa prueba se omite de forma explícita.
 
-En esta fase no se implementan CRUD, login/JWT, almacenamiento de imágenes,
-reclamaciones ni chat. La persistencia aún no está conectada a los endpoints de
-análisis y coincidencias.
+## Autenticación persistente
+
+Se usan `pwdlib[argon2]` y PyJWT siguiendo la
+[guía oficial de seguridad de FastAPI](https://fastapi.tiangolo.com/tutorial/security/oauth2-jwt/).
+El login recibe JSON, por lo que la documentación interactiva utiliza el esquema
+HTTP Bearer: después del login pega el token en **Authorize**.
+
+### Arquitectura y transacciones
+
+- Dominio: entidad `User`, roles, normalizadores, errores y puertos de repositorio,
+  hash y tokens; no importa FastAPI ni SQLAlchemy.
+- Aplicación: casos de uso `RegisterUser`, `LoginUser` y `GetCurrentUser`.
+- Infraestructura: repositorio SQLAlchemy, hash Argon2id con sal aleatoria y
+  adaptador JWT. El registro hace commit; cualquier error de escritura revierte
+  la transacción. Las restricciones únicas resuelven también registros concurrentes.
+- API: schemas explícitos sin hash, dependencias y rutas. Una sesión por petición
+  se cierra al terminar, incluidos los errores; no se devuelven entidades ORM.
+
+No hay cambios de estructura ni migración `0002`: la revisión
+`0001_postgresql_foundation` ya contiene los campos y restricciones necesarios y
+permanece intacta. `alembic upgrade head` conserva la información existente.
+
+### Configuración JWT manual
+
+Conserva las variables existentes de Gemini y PostgreSQL y añade manualmente:
+
+```ini
+JWT_SECRET_KEY=<clave-local-generada>
+JWT_ALGORITHM=HS256
+ACCESS_TOKEN_EXPIRE_MINUTES=60
+```
+
+Genera una clave aleatoria local de 32 bytes (64 caracteres hexadecimales):
+
+```powershell
+python -c "import secrets; print(secrets.token_hex(32))"
+```
+
+Copia esa salida solo a tu `.env` local; no la compartas ni la subas. No utilices
+el texto de ejemplo como clave. `JWT_SECRET_KEY` es `SecretStr`, se oculta en la
+configuración y debe tener al menos 32 bytes. El único algoritmo admitido es
+HS256; la duración debe ser positiva. Reinicia Uvicorn tras configurarlos.
+Una clave ausente o vacía devuelve HTTP 503 controlado en login y validación JWT;
+el registro y los endpoints anteriores no dependen de la clave JWT.
+
+### Contratos y reglas
+
+`POST /api/v1/auth/register` recibe `full_name`, `email`, `student_code` y
+`password`. Devuelve HTTP 201 con `id`, `full_name`, `email`, `student_code`,
+`role` e `is_active`. El nombre colapsa espacios; el email se recorta y pasa a
+minúsculas; el código se recorta y pasa a mayúsculas. El código admite letras,
+dígitos, punto, guion y guion bajo, hasta 50 caracteres. El nombre admite hasta
+200 y el email hasta 254. La contraseña admite de 8 a 128 caracteres y conserva
+exactamente sus espacios. Solo se almacena el hash Argon2id.
+
+Los campos adicionales (`role`, `is_active`, `password_hash`, etc.) se rechazan
+con HTTP 422. Todo registro público crea un usuario `student` activo; no existe
+un endpoint público para crear administradores. Email o código duplicados
+devuelven HTTP 409. Los errores de validación no incluyen el cuerpo original ni
+los valores de los campos.
+
+`POST /api/v1/auth/login` recibe email y contraseña. Devuelve `access_token`,
+`token_type: "bearer"`, `expires_in` en segundos y `user` con los mismos campos
+públicos del registro. No se guardan tokens en la base. Correo inexistente y
+contraseña incorrecta producen el mismo HTTP 401, con `WWW-Authenticate: Bearer`;
+el caso inexistente también realiza una verificación de hash ficticio para
+reducir diferencias de tiempo. Un usuario inactivo con contraseña correcta
+recibe HTTP 403.
+
+El JWT lleva `sub` (UUID), `role`, `iat` y `exp`. Se exige la presencia de los
+cuatro campos, firma HS256 válida y vigencia. `GET /api/v1/auth/me` requiere
+`Authorization: Bearer <token>` y consulta al usuario en PostgreSQL. Ausencia,
+modificación, expiración o usuario eliminado producen HTTP 401; usuario inactivo,
+HTTP 403. El rol y estado actuales se consultan en la base, aunque cambien después
+de emitir el token. Ni contraseñas, hashes ni tokens se registran en logs; el
+token solo se entrega en el contrato de login, con `Cache-Control: no-store`.
+
+### Prueba manual desde PowerShell
+
+Después de configurar las variables, aplicar `python -m alembic upgrade head` y
+arrancar `python -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8000`,
+ejecuta en otra terminal:
+
+```powershell
+$baseUrl = 'http://127.0.0.1:8000/api/v1'
+$credential = Get-Credential -UserName 'usuario@universidad.edu.co' -Message 'Contraseña de prueba (mínimo 8 caracteres)'
+$plainPassword = $credential.GetNetworkCredential().Password
+try {
+    $body = @{
+        full_name = 'Usuario Prueba'
+        email = $credential.UserName
+        student_code = '20260001'
+        password = $plainPassword
+    } | ConvertTo-Json
+    $registered = Invoke-RestMethod -Method Post -Uri "$baseUrl/auth/register" -ContentType 'application/json' -Body $body
+    $registered | Format-List
+
+    $body = @{ email = $credential.UserName; password = $plainPassword } | ConvertTo-Json
+    $session = Invoke-RestMethod -Method Post -Uri "$baseUrl/auth/login" -ContentType 'application/json' -Body $body
+    $session.user | Format-List
+    $headers = @{ Authorization = "Bearer $($session.access_token)" }
+    Invoke-RestMethod -Uri "$baseUrl/auth/me" -Headers $headers | Format-List
+} finally {
+    Remove-Variable plainPassword, body, session, headers, credential -ErrorAction SilentlyContinue
+}
+```
+
+No imprimas `$body`, `$headers` ni `$session` completos. El primer comando de
+registro inserta un usuario real; si repites el mismo email o código, obtendrás
+409. Para verlo en pgAdmin sin consultar hashes:
+
+```sql
+SELECT id, full_name, email, student_code, role, is_active, created_at
+FROM users
+WHERE email = 'usuario@universidad.edu.co';
+```
+
+Las pruebas normales de autenticación usan SQLite temporal y Argon2/JWT reales;
+no leen `.env`. La integración PostgreSQL es opcional y solo usa
+`TEST_DATABASE_URL` en una **base aislada de pruebas**, nunca la base normal:
+ejecuta upgrade/downgrade y elimina únicamente su esquema de prueba.
+
+Quedan para fases posteriores los reportes persistentes, análisis y coincidencias
+guardados, recuperación de contraseña, refresh/revocación de tokens, límites de
+intentos de login, almacenamiento de imágenes, reclamaciones y chat.

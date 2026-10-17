@@ -1,7 +1,9 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.api.auth_errors import register_auth_error_handlers
 from app.api.routes.ai import router as ai_router
+from app.api.routes.auth import router as auth_router
 from app.api.routes.database import router as database_router
 from app.api.routes.matches import router as matches_router
 from app.core.config import get_settings
@@ -24,6 +26,7 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+    register_auth_error_handlers(app)
 
     @app.get("/health", tags=["health"])
     def health() -> dict[str, str]:
@@ -34,6 +37,7 @@ def create_app() -> FastAPI:
         }
 
     app.include_router(ai_router, prefix=settings.api_prefix)
+    app.include_router(auth_router, prefix=settings.api_prefix)
     app.include_router(matches_router, prefix=settings.api_prefix)
     app.include_router(database_router)
     return app
