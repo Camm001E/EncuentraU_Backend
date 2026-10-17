@@ -1,4 +1,5 @@
 import os
+import secrets
 from decimal import Decimal
 from uuid import uuid4
 
@@ -12,8 +13,11 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from sqlalchemy.schema import CreateSchema, DropSchema
 
+from app.api.dependencies.authentication import get_auth_session
+from app.core.config import Settings, get_settings
+from app.infrastructure.auth_security import get_password_hasher
 from app.infrastructure.database import engine as database_engine
-from app.infrastructure.database.models import ImageAnalysis
+from app.infrastructure.database.models import ImageAnalysis, User
 from app.main import app
 from tests.test_database_models import make_match, make_report, make_user
 from tests.test_migrations import migration_config
@@ -100,10 +104,61 @@ def test_postgresql_migrations_constraints_json_and_health(monkeypatch) -> None:
                 connection.commit()
 
                 monkeypatch.setattr(database_engine, "get_engine", lambda: engine)
-                with TestClient(app) as client:
-                    response = client.get("/health/database")
-                assert response.status_code == 200
-                assert response.json()["database"] == "postgresql"
+
+                def isolated_session():
+                    with Session(connection, expire_on_commit=False) as session:
+                        yield session
+
+                settings = Settings(
+                    _env_file=None,
+                    database_url=None,
+                    jwt_secret_key=secrets.token_hex(32),
+                )
+                app.dependency_overrides[get_auth_session] = isolated_session
+                app.dependency_overrides[get_settings] = lambda: settings
+                try:
+                    with TestClient(app) as client:
+                        response = client.get("/health/database")
+                        assert response.status_code == 200
+                        assert response.json()["database"] == "postgresql"
+                        payload = {
+                            "full_name": "Usuario de integración PostgreSQL",
+                            "email": "  USUARIO@UNIVERSIDAD.EDU.CO  ",
+                            "student_code": " AUTH-20260001 ",
+                            "password": "UnaClaveDePrueba123",
+                        }
+                        response = client.post("/api/v1/auth/register", json=payload)
+                        assert response.status_code == 201
+                        assert response.json()["role"] == "student"
+                        with Session(connection) as session:
+                            saved = session.scalar(select(User))
+                            assert saved.email == "usuario@universidad.edu.co"
+                            assert saved.student_code == "AUTH-20260001"
+                            assert saved.password_hash.startswith("$argon2id$")
+                            assert get_password_hasher().verify(
+                                payload["password"], saved.password_hash
+                            )
+                        duplicate = client.post("/api/v1/auth/register", json=payload)
+                        assert duplicate.status_code == 409
+                        response = client.post(
+                            "/api/v1/auth/login",
+                            json={
+                                "email": saved.email,
+                                "password": payload["password"],
+                            },
+                        )
+                        assert response.status_code == 200
+                        token = response.json()["access_token"]
+                        response = client.get(
+                            "/api/v1/auth/me",
+                            headers={"Authorization": f"Bearer {token}"},
+                        )
+                        assert response.status_code == 200
+                        assert response.json()["email"] == saved.email
+                        assert "password_hash" not in response.json()
+                finally:
+                    app.dependency_overrides.pop(get_auth_session, None)
+                    app.dependency_overrides.pop(get_settings, None)
             finally:
                 connection.rollback()
                 connection.exec_driver_sql("SET search_path TO public")
