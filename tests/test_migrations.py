@@ -13,9 +13,16 @@ def migration_config() -> Config:
 
 def test_initial_migration_is_importable() -> None:
     script = ScriptDirectory.from_config(migration_config())
-    assert script.get_heads() == ["0001_postgresql_foundation"]
-    revision = script.get_revision("head")
+    assert script.get_heads() == ["0002_match_updated_at"]
+    revision = script.get_revision("0001_postgresql_foundation")
     assert revision.down_revision is None
+    assert callable(revision.module.upgrade)
+    assert callable(revision.module.downgrade)
+
+
+def test_match_timestamp_migration_is_importable() -> None:
+    revision = ScriptDirectory.from_config(migration_config()).get_revision("head")
+    assert revision.down_revision == "0001_postgresql_foundation"
     assert callable(revision.module.upgrade)
     assert callable(revision.module.downgrade)
 

@@ -135,7 +135,7 @@ class ImageAnalysis(UUIDPrimaryKey, CreatedAt, Base):
     report: Mapped[ObjectReport] = relationship(back_populates="analyses")
 
 
-class ObjectMatch(UUIDPrimaryKey, CreatedAt, Base):
+class ObjectMatch(UUIDPrimaryKey, Timestamps, Base):
     __tablename__ = "object_matches"
     __table_args__ = (
         UniqueConstraint(
