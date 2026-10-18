@@ -50,6 +50,10 @@ def test_postgresql_migrations_constraints_json_and_health(monkeypatch) -> None:
                     "report_images",
                     "object_matches",
                     "alembic_version",
+                    "ownership_claims",
+                    "conversations",
+                    "conversation_participants",
+                    "messages",
                 }
                 columns = {
                     column["name"]: column

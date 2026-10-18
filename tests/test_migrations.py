@@ -13,7 +13,7 @@ def migration_config() -> Config:
 
 def test_initial_migration_is_importable() -> None:
     script = ScriptDirectory.from_config(migration_config())
-    assert script.get_heads() == ["0003_report_images"]
+    assert script.get_heads() == ["0004_ownership_chat"]
     revision = script.get_revision("0001_postgresql_foundation")
     assert revision.down_revision is None
     assert callable(revision.module.upgrade)
@@ -41,6 +41,10 @@ def test_migration_generates_postgresql_sql_without_credentials() -> None:
         "image_analyses",
         "object_matches",
         "report_images",
+        "ownership_claims",
+        "conversations",
+        "conversation_participants",
+        "messages",
     ):
         assert f"CREATE TABLE {table}" in sql
     assert "JSONB" in sql
@@ -55,10 +59,10 @@ def test_migration_can_upgrade_downgrade_and_upgrade_again() -> None:
         with engine.connect() as connection:
             config.attributes["connection"] = connection
             command.upgrade(config, "head")
-            assert len(inspect(connection).get_table_names()) == 6
+            assert len(inspect(connection).get_table_names()) == 10
             command.downgrade(config, "base")
             assert inspect(connection).get_table_names() == ["alembic_version"]
             command.upgrade(config, "head")
-            assert len(inspect(connection).get_table_names()) == 6
+            assert len(inspect(connection).get_table_names()) == 10
     finally:
         engine.dispose()

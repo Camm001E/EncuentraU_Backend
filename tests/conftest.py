@@ -2,6 +2,8 @@ from unittest.mock import patch
 
 from app.core.config import Settings, get_settings
 
+pytest_plugins = ["tests.ownership_support"]
+
 
 def pytest_configure() -> None:
     # Prime the shared settings cache before collection imports app.main.
