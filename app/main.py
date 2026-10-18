@@ -8,11 +8,14 @@ from app.api.match_errors import register_match_error_handlers
 from app.api.report_errors import register_report_error_handlers
 from app.api.routes.ai import router as ai_router
 from app.api.routes.auth import router as auth_router
+from app.api.routes.conversations import router as conversations_router
 from app.api.routes.database import router as database_router
 from app.api.routes.matches import router as matches_router
 from app.api.routes.object_matches import router as object_matches_router
+from app.api.routes.ownership_claims import router as ownership_router
 from app.api.routes.report_images import router as report_images_router
 from app.api.routes.reports import router as reports_router
+from app.api.workflow_errors import register_workflow_error_handlers
 from app.core.config import get_settings
 
 
@@ -42,6 +45,7 @@ def create_app() -> FastAPI:
     register_auth_error_handlers(app)
     register_report_error_handlers(app)
     register_match_error_handlers(app)
+    register_workflow_error_handlers(app)
 
     @app.get("/health", tags=["health"])
     def health() -> dict[str, str]:
@@ -57,6 +61,8 @@ def create_app() -> FastAPI:
     app.include_router(object_matches_router, prefix=settings.api_prefix)
     app.include_router(reports_router, prefix=settings.api_prefix)
     app.include_router(report_images_router, prefix=settings.api_prefix)
+    app.include_router(ownership_router, prefix=settings.api_prefix)
+    app.include_router(conversations_router, prefix=settings.api_prefix)
     app.include_router(database_router)
     return app
 

@@ -3,6 +3,7 @@ import logging
 from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
+from app.domain.authentication import InactiveUserError
 from app.domain.object_reports import ReportNotActiveError, ReportStatus
 from app.domain.ports.report_images import (
     ImageProcessor,
@@ -37,6 +38,8 @@ class ReportImageService:
     def _authorize(
         access: ImageAccess | None, user: User, *, write: bool
     ) -> ImageAccess:
+        if not user.is_active:
+            raise InactiveUserError
         if access is None:
             raise ImageNotFoundError
         if write:

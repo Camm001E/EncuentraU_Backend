@@ -27,6 +27,7 @@ from app.domain.object_reports import (
 from app.domain.ports.object_match_repository import MatchCandidates
 from app.infrastructure.database.models import ObjectMatch as MatchModel
 from app.infrastructure.database.models import ObjectReport as ReportModel
+from app.infrastructure.database.models import OwnershipClaim as ClaimModel
 from app.infrastructure.database.object_report_repository import (
     SQLAlchemyObjectReportRepository,
 )
@@ -144,6 +145,9 @@ class SQLAlchemyObjectMatchRepository:
             delete(MatchModel).where(
                 self._involves(source.id),
                 MatchModel.status == MatchStatus.PENDING,
+                ~select(ClaimModel.id)
+                .where(ClaimModel.match_id == MatchModel.id)
+                .exists(),
                 other_column.not_in(retained),
             ),
             execution_options={"synchronize_session": False},
@@ -169,7 +173,10 @@ class SQLAlchemyObjectMatchRepository:
                         },
                         "updated_at": func.clock_timestamp(),
                     },
-                    where=MatchModel.status == MatchStatus.PENDING,
+                    where=(MatchModel.status == MatchStatus.PENDING)
+                    & ~select(ClaimModel.id)
+                    .where(ClaimModel.match_id == MatchModel.id)
+                    .exists(),
                 )
             )
         statement = self._visible_query(source.user_id).where(self._involves(source.id))

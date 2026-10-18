@@ -820,3 +820,80 @@ En Postman: autenticar como propietario, enviar PUT multipart con clave `image` 
 File y luego GET de metadatos/contenido. Repetir la consulta como participante y tercero.
 No publicar fotografías ni tokens de prueba. La prueba de Alembic destructiva solo se
 permite con `TEST_DATABASE_URL` apuntando a una base aislada con `_test` en el nombre.
+
+## Reclamaciones y chat privado
+
+La migración aditiva `0004_ownership_chat` crea `ownership_claims`, `conversations`,
+`conversation_participants` y `messages`. Las revisiones anteriores no cambian.
+Aplicar con `python -m alembic upgrade head`; comprobar con `python -m alembic check`.
+No ejecutar downgrade en la base de desarrollo con registros reales.
+
+El dominio define reglas y puertos sin FastAPI ni SQLAlchemy. Los casos de uso
+autorizan cada operación; los adaptadores comparten una sesión por petición y
+realizan commit o rollback. Aprobar/rechazar bloquea la coincidencia y sus reportes.
+La generación de coincidencias comparte el bloqueo transaccional y conserva las
+parejas y evidencias que ya tienen reclamación pendiente. Las restricciones únicas
+protegen los reintentos y las decisiones concurrentes.
+
+| Método | Ruta (prefijo `/api/v1`) | Acceso y resultado |
+| --- | --- | --- |
+| POST | `/matches/{match_id}/claims` | Dueño del perdido; 201 |
+| GET | `/claims/me` | Reclamante o custodio; paginación y `status` |
+| GET | `/matches/{match_id}/claim` | Resumen del participante; 404 si no existe |
+| GET | `/claims/{claim_id}` | Detalle seguro del participante |
+| GET | `/admin/claims` | Admin activo; orden de antigüedad, `status`, `limit`, `offset` |
+| GET | `/admin/claims/{claim_id}` | Evidencia y características privadas para revisión |
+| POST | `/admin/claims/{claim_id}/approve` | Admin; nota opcional |
+| POST | `/admin/claims/{claim_id}/reject` | Admin; motivo obligatorio y nota opcional |
+| GET | `/conversations/me` | Solo conversaciones del participante |
+| GET | `/conversations/{conversation_id}` | Resumen, último mensaje y no leídos |
+| GET | `/conversations/{conversation_id}/messages` | `limit` hasta 100 y cursor `before` |
+| POST | `/conversations/{conversation_id}/messages` | Texto y UUID de reintento; 201 |
+| POST | `/conversations/{conversation_id}/read` | Marca lectura; 204 |
+
+Todas requieren Bearer y responden `Cache-Control: private, no-store`. Un tercero
+recibe 404; un estudiante en rutas administrativas, 403 con `permission_denied`,
+sin invalidar su sesión. Una cuenta inactiva sigue bloqueada. Conflictos de estado
+responden 409 con `workflow_error`. Los errores no repiten el cuerpo enviado.
+
+Solo el propietario del reporte perdido puede enviar `ownership_evidence`
+(10 a 4000 caracteres normalizados), si ambos reportes están activos y la
+coincidencia está pendiente. El mismo reintento devuelve la reclamación existente;
+otra evidencia para esa pareja provoca 409. El custodio ve el estado, nunca la
+respuesta privada. Los estudiantes no reciben características privadas ajenas,
+nota interna, correos, códigos ni IDs de otros usuarios. La cola administrativa
+también omite la evidencia privada; únicamente su detalle autorizado la devuelve.
+Un administrador no puede decidir una reclamación en la que sea participante.
+
+La aprobación cambia reclamación a `approved` y coincidencia a `accepted`, y crea
+exactamente una conversación y dos participantes dentro de una única transacción.
+El rechazo exige `rejection_reason` (3 a 2000 caracteres), cambia ambos estados y
+no crea chat. No se repite una decisión final. Las notas internas no se muestran a
+estudiantes; el motivo sí se muestra, por lo que no debe copiar secretos privados.
+
+El chat exige membresía y aprobación, incluso para un administrador. Los nombres
+de visualización usan solo el primer nombre; no incluyen correo ni código. Enviar
+`{"body": "Texto para coordinar la entrega", "client_message_id": "<UUID nuevo>"}`.
+El mismo UUID por remitente y contenido devuelve el mensaje existente; reutilizarlo
+con otro contenido o conversación provoca 409. Texto plano entre 1 y 2000
+caracteres, sin edición ni eliminación. No hay adjuntos ni WebSocket.
+
+Las páginas de mensajes se devuelven cronológicamente; `next_cursor` apunta a los
+mensajes anteriores mediante fecha UTC y UUID estables. La lectura puede enviar
+`{"last_message_id": "<último mensaje mostrado>"}` para no marcar como leídos
+mensajes nuevos que todavía no se descargaron. `unread_count` excluye los propios.
+Las cuatro tablas usan fechas con zona horaria y FK que conservan el historial.
+
+### Crear un administrador local
+
+Desde una terminal privada del backend con su entorno virtual:
+
+```bash
+python -m app.cli.create_admin
+```
+
+El comando solicita nombre, correo y código; pide y confirma la contraseña con
+`getpass`, sin mostrarla. Valida duplicados y guarda únicamente Argon2. No pasar
+contraseñas como argumentos ni guardarlas en scripts. El registro público sigue
+creando exclusivamente estudiantes. No se proporciona ninguna cuenta o clave por
+defecto. Después, iniciar sesión mediante el endpoint habitual de autenticación.
