@@ -12,6 +12,8 @@ from sqlalchemy import (
     Date,
     DateTime,
     ForeignKey,
+    ForeignKeyConstraint,
+    Index,
     Integer,
     Numeric,
     SmallInteger,
@@ -217,3 +219,118 @@ class ObjectMatch(UUIDPrimaryKey, Timestamps, Base):
     found_report: Mapped[ObjectReport] = relationship(
         back_populates="found_matches", foreign_keys=[found_report_id]
     )
+
+
+class OwnershipClaim(UUIDPrimaryKey, Timestamps, Base):
+    __tablename__ = "ownership_claims"
+    __table_args__ = (
+        UniqueConstraint("match_id"),
+        UniqueConstraint("id", "match_id", name="uq_ownership_claims_id_match"),
+        CheckConstraint(
+            "claimant_user_id <> custodian_user_id", name="different_users"
+        ),
+        CheckConstraint("status IN ('pending', 'approved', 'rejected')", name="status"),
+        CheckConstraint(
+            "length(trim(ownership_evidence)) BETWEEN 10 AND 4000",
+            name="evidence_length",
+        ),
+        CheckConstraint(
+            "admin_note IS NULL OR length(admin_note) BETWEEN 1 AND 2000",
+            name="note_length",
+        ),
+        CheckConstraint(
+            "(status = 'pending' AND admin_id IS NULL AND reviewed_at IS NULL "
+            "AND rejection_reason IS NULL) OR "
+            "(status = 'approved' AND admin_id IS NOT NULL AND reviewed_at IS NOT NULL "
+            "AND rejection_reason IS NULL) OR "
+            "(status = 'rejected' AND admin_id IS NOT NULL AND reviewed_at IS NOT NULL "
+            "AND rejection_reason IS NOT NULL "
+            "AND length(trim(rejection_reason)) BETWEEN 3 AND 2000)",
+            name="review_state",
+        ),
+        Index("ix_ownership_claims_status_created_at", "status", "created_at", "id"),
+        Index("ix_ownership_claims_created_at", "created_at"),
+    )
+    match_id: Mapped[UUID] = mapped_column(
+        ForeignKey("object_matches.id", ondelete="RESTRICT")
+    )
+    claimant_user_id: Mapped[UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="RESTRICT"), index=True
+    )
+    custodian_user_id: Mapped[UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="RESTRICT"), index=True
+    )
+    status: Mapped[str] = mapped_column(
+        String(16), default="pending", server_default="pending"
+    )
+    ownership_evidence: Mapped[str] = mapped_column(Text)
+    admin_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="RESTRICT")
+    )
+    admin_note: Mapped[str | None] = mapped_column(Text)
+    rejection_reason: Mapped[str | None] = mapped_column(Text)
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class Conversation(UUIDPrimaryKey, Timestamps, Base):
+    __tablename__ = "conversations"
+    __table_args__ = (
+        UniqueConstraint("match_id"),
+        UniqueConstraint("claim_id"),
+        ForeignKeyConstraint(
+            ["claim_id", "match_id"],
+            ["ownership_claims.id", "ownership_claims.match_id"],
+            name="fk_conversations_claim_match",
+            ondelete="RESTRICT",
+        ),
+        CheckConstraint("status IN ('active', 'closed')", name="status"),
+    )
+    match_id: Mapped[UUID] = mapped_column(
+        ForeignKey("object_matches.id", ondelete="RESTRICT")
+    )
+    claim_id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True))
+    status: Mapped[str] = mapped_column(
+        String(16), default="active", server_default="active"
+    )
+
+
+class ConversationParticipant(Base):
+    __tablename__ = "conversation_participants"
+    conversation_id: Mapped[UUID] = mapped_column(
+        ForeignKey("conversations.id", ondelete="RESTRICT"), primary_key=True
+    )
+    user_id: Mapped[UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="RESTRICT"), primary_key=True, index=True
+    )
+    last_read_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    joined_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
+class Message(UUIDPrimaryKey, CreatedAt, Base):
+    __tablename__ = "messages"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["conversation_id", "sender_id"],
+            [
+                "conversation_participants.conversation_id",
+                "conversation_participants.user_id",
+            ],
+            name="fk_messages_participant",
+            ondelete="RESTRICT",
+        ),
+        UniqueConstraint(
+            "sender_id", "client_message_id", name="uq_messages_sender_client"
+        ),
+        CheckConstraint("length(trim(body)) BETWEEN 1 AND 2000", name="body_length"),
+        Index(
+            "ix_messages_conversation_created_id", "conversation_id", "created_at", "id"
+        ),
+    )
+    conversation_id: Mapped[UUID] = mapped_column(
+        ForeignKey("conversations.id", ondelete="RESTRICT")
+    )
+    sender_id: Mapped[UUID] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"))
+    client_message_id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True))
+    body: Mapped[str] = mapped_column(Text)

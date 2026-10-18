@@ -91,8 +91,15 @@ def test_metadata_contains_all_tables_and_no_binary_image_columns(engine) -> Non
         "image_analyses",
         "report_images",
         "object_matches",
+        "ownership_claims",
+        "conversations",
+        "conversation_participants",
+        "messages",
     }
     for table in Base.metadata.tables.values():
+        if table.name == "conversation_participants":
+            assert {"conversation_id", "user_id", "joined_at"}.issubset(table.c.keys())
+            continue
         assert "id" in table.c
         assert "created_at" in table.c
         assert not any(isinstance(column.type, LargeBinary) for column in table.c)
