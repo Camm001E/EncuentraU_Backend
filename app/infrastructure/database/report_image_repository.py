@@ -38,6 +38,10 @@ class SQLAlchemyReportImageRepository:
         self, report_id: UUID, user_id: UUID, *, write: bool = False
     ) -> Iterator[ImageAccess | None]:
         try:
+            if write:
+                from app.infrastructure.database.evidence_guard import workflow_gate
+
+                workflow_gate(self.session)
             report = self.session.scalar(
                 select(ObjectReport)
                 .where(ObjectReport.id == report_id)
@@ -47,6 +51,12 @@ class SQLAlchemyReportImageRepository:
             if report is None:
                 yield None
             else:
+                if write and report.user_id == user_id:
+                    from app.infrastructure.database.evidence_guard import (
+                        require_mutable_evidence,
+                    )
+
+                    require_mutable_evidence(self.session, report_id)
                 lost = aliased(ObjectReport)
                 found = aliased(ObjectReport)
                 participant = False

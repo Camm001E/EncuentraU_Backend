@@ -54,6 +54,8 @@ def test_postgresql_migrations_constraints_json_and_health(monkeypatch) -> None:
                     "conversations",
                     "conversation_participants",
                     "messages",
+                    "deliveries",
+                    "delivery_events",
                 }
                 columns = {
                     column["name"]: column

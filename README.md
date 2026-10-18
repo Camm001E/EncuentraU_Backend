@@ -897,3 +897,48 @@ El comando solicita nombre, correo y código; pide y confirma la contraseña con
 contraseñas como argumentos ni guardarlas en scripts. El registro público sigue
 creando exclusivamente estudiantes. No se proporciona ninguna cuenta o clave por
 defecto. Después, iniciar sesión mediante el endpoint habitual de autenticación.
+
+### Entrega y cierre auditable
+
+La migración `0005_delivery_closure` agrega `deliveries` y `delivery_events`.
+Cada aprobación crea entrega, conversación y participantes en la misma transacción.
+El upgrade incorpora conversaciones aprobadas anteriores sin cambiar sus mensajes.
+Los eventos son inmutables, incluso mediante SQL en PostgreSQL.
+
+Flujo: `coordinating → awaiting_confirmations → awaiting_admin → completed`.
+Una parte puede abrir `disputed` antes del cierre. Administración puede devolver
+una disputa o una entrega pendiente de validación a `coordinating`; reinicia las
+confirmaciones actuales y conserva las anteriores en el historial. Esta reapertura
+desde `awaiting_admin` es una excepción administrativa explícita.
+
+Rutas privadas, todas con Bearer y `Cache-Control: private, no-store`:
+
+| Método | Ruta bajo `/api/v1` | Acceso |
+| --- | --- | --- |
+| GET | `/deliveries/me?status=&limit=20&offset=0` | Participante |
+| GET | `/conversations/{id}/delivery` | Participante |
+| POST | `/deliveries/{id}/confirm` | Participante; sin rol en el body |
+| POST | `/deliveries/{id}/dispute` | Participante; `{"reason":"Motivo detallado"}` |
+| GET | `/deliveries/{id}/events` | Participante o administrador |
+| GET | `/admin/deliveries` | Administrador; mismas opciones de paginación |
+| GET | `/admin/deliveries/{id}` | Administrador |
+| POST | `/admin/deliveries/{id}/complete` | Administrador; nota opcional |
+| POST | `/admin/deliveries/{id}/reopen` | Administrador; nota obligatoria |
+
+Las notas administrativas usan `{"admin_note":"Texto de revisión"}` y nunca se
+devuelven a estudiantes. El motivo de disputa admite 10–2000 caracteres y la nota
+administrativa 1–2000. La cola prioriza disputas, validaciones, confirmaciones,
+coordinación y completadas. El detalle administrativo expone cantidad y fecha de
+mensajes, **sin su contenido**; la administración no adquiere membresía del chat.
+
+Confirmar es idempotente y depende de la identidad del JWT. Los bloqueos de
+transacción impiden confirmaciones/eventos duplicados y cierres concurrentes.
+Validar exige ambas confirmaciones, reclamación aprobada, coincidencia aceptada y
+reportes activos. Cierra la entrega y conversación y resuelve ambos reportes en
+una sola transacción. El historial del chat sigue disponible; enviar devuelve 409.
+
+Mientras exista una reclamación pendiente o aprobada, no se pueden editar ni
+cancelar sus reportes ni modificar fotografías (409). Tras un rechazo pueden
+editarse nuevamente si permanecen activos. Las fotografías y mensajes conservan
+sus permisos después del cierre. Terceros reciben 404; estudiantes en admin, 403.
+No hay entrega automática, pagos, ubicación en tiempo real ni nuevas llamadas IA.

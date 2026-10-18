@@ -61,7 +61,7 @@ class SendMessage(ConversationUseCase):
         with self.repository.transaction(conversation_id) as access:
             if access is None:
                 raise WorkflowNotFound
-            access.authorize(user)
+            access.authorize(user, write=True)
             return self.repository.send(
                 conversation_id, user.id, body, client_message_id
             )
