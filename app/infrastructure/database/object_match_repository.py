@@ -30,6 +30,7 @@ from app.infrastructure.database.models import ObjectReport as ReportModel
 from app.infrastructure.database.object_report_repository import (
     SQLAlchemyObjectReportRepository,
 )
+from app.infrastructure.database.report_image_repository import image_reference
 
 # Generations can start at either end of a pair. A transaction-level gate gives
 # upsert and stale-pair cleanup a consistent order across concurrent requests.
@@ -60,7 +61,9 @@ class SQLAlchemyObjectMatchRepository:
             source = self.session.scalar(
                 select(ReportModel)
                 .where(ReportModel.id == report_id, ReportModel.user_id == user_id)
-                .options(selectinload(ReportModel.analyses))
+                .options(
+                    selectinload(ReportModel.analyses), selectinload(ReportModel.image)
+                )
                 .with_for_update()
                 .execution_options(populate_existing=True)
             )
@@ -97,7 +100,9 @@ class SQLAlchemyObjectMatchRepository:
                     ReportModel.event_date.between(earliest, latest),
                 )
                 .order_by(ReportModel.id)
-                .options(selectinload(ReportModel.analyses))
+                .options(
+                    selectinload(ReportModel.analyses), selectinload(ReportModel.image)
+                )
                 .with_for_update(read=True)
                 .execution_options(populate_existing=True)
             ).all()
@@ -182,6 +187,7 @@ class SQLAlchemyObjectMatchRepository:
             .join(lost, MatchModel.lost_report_id == lost.id)
             .join(found, MatchModel.found_report_id == found.id)
             .where(or_(lost.user_id == user_id, found.user_id == user_id))
+            .options(selectinload(lost.image), selectinload(found.image))
             .order_by(
                 MatchModel.percentage.desc(),
                 MatchModel.created_at.desc(),
@@ -205,6 +211,7 @@ class SQLAlchemyObjectMatchRepository:
             description=report.description,
             location=report.location,
             event_date=report.event_date,
+            image=image_reference(report.image) if report.image is not None else None,
         )
 
     @classmethod

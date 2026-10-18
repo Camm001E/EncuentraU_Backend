@@ -22,6 +22,7 @@ from app.domain.object_reports import (
 )
 from app.infrastructure.database.models import ImageAnalysis as AnalysisModel
 from app.infrastructure.database.models import ObjectReport as ReportModel
+from app.infrastructure.database.report_image_repository import image_reference
 
 
 class SQLAlchemyObjectReportRepository:
@@ -43,6 +44,7 @@ class SQLAlchemyObjectReportRepository:
             ),
             created_at=model.created_at,
             updated_at=model.updated_at,
+            image=image_reference(model.image) if model.image is not None else None,
             analysis=(
                 ImageAnalysis(
                     id=latest.id,
@@ -98,7 +100,9 @@ class SQLAlchemyObjectReportRepository:
             model = self.session.scalar(
                 select(ReportModel)
                 .where(ReportModel.id == report_id, ReportModel.user_id == user_id)
-                .options(selectinload(ReportModel.analyses))
+                .options(
+                    selectinload(ReportModel.analyses), selectinload(ReportModel.image)
+                )
             )
             return self.to_domain(model) if model is not None else None
         except SQLAlchemyError:
@@ -129,7 +133,9 @@ class SQLAlchemyObjectReportRepository:
                 .order_by(ReportModel.created_at.desc(), ReportModel.id.desc())
                 .limit(limit)
                 .offset(offset)
-                .options(selectinload(ReportModel.analyses))
+                .options(
+                    selectinload(ReportModel.analyses), selectinload(ReportModel.image)
+                )
             ).all()
             return ReportPage(
                 items=tuple(self.to_domain(model) for model in models),
@@ -152,7 +158,9 @@ class SQLAlchemyObjectReportRepository:
                 )
                 .with_for_update()
                 .execution_options(populate_existing=True)
-                .options(selectinload(ReportModel.analyses))
+                .options(
+                    selectinload(ReportModel.analyses), selectinload(ReportModel.image)
+                )
             )
             if model is None:
                 raise ReportNotFoundError

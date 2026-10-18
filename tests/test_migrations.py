@@ -13,7 +13,7 @@ def migration_config() -> Config:
 
 def test_initial_migration_is_importable() -> None:
     script = ScriptDirectory.from_config(migration_config())
-    assert script.get_heads() == ["0002_match_updated_at"]
+    assert script.get_heads() == ["0003_report_images"]
     revision = script.get_revision("0001_postgresql_foundation")
     assert revision.down_revision is None
     assert callable(revision.module.upgrade)
@@ -21,7 +21,9 @@ def test_initial_migration_is_importable() -> None:
 
 
 def test_match_timestamp_migration_is_importable() -> None:
-    revision = ScriptDirectory.from_config(migration_config()).get_revision("head")
+    revision = ScriptDirectory.from_config(migration_config()).get_revision(
+        "0002_match_updated_at"
+    )
     assert revision.down_revision == "0001_postgresql_foundation"
     assert callable(revision.module.upgrade)
     assert callable(revision.module.downgrade)
@@ -33,7 +35,13 @@ def test_migration_generates_postgresql_sql_without_credentials() -> None:
     config.output_buffer = StringIO()
     command.upgrade(config, "head", sql=True)
     sql = config.output_buffer.getvalue()
-    for table in ("users", "object_reports", "image_analyses", "object_matches"):
+    for table in (
+        "users",
+        "object_reports",
+        "image_analyses",
+        "object_matches",
+        "report_images",
+    ):
         assert f"CREATE TABLE {table}" in sql
     assert "JSONB" in sql
     assert "uq_object_matches_pair" in sql
@@ -47,10 +55,10 @@ def test_migration_can_upgrade_downgrade_and_upgrade_again() -> None:
         with engine.connect() as connection:
             config.attributes["connection"] = connection
             command.upgrade(config, "head")
-            assert len(inspect(connection).get_table_names()) == 5
+            assert len(inspect(connection).get_table_names()) == 6
             command.downgrade(config, "base")
             assert inspect(connection).get_table_names() == ["alembic_version"]
             command.upgrade(config, "head")
-            assert len(inspect(connection).get_table_names()) == 5
+            assert len(inspect(connection).get_table_names()) == 6
     finally:
         engine.dispose()

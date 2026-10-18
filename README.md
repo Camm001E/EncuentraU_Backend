@@ -756,3 +756,67 @@ Las pruebas de orquestación usan los fixtures de fotografías ya guardados y un
 base PostgreSQL temporal con `_test` en su nombre. Cubren concurrencia, idempotencia,
 rollback tras escrituras y limpieza, privacidad, reglas temporales, estados
 protegidos y upgrade de datos existentes. No consumen Gemini ni la base normal.
+
+
+## Fotografías persistentes y privadas
+
+La migración `0003_report_images` añade una fotografía principal opcional por reporte.
+PostgreSQL conserva UUID, FK única, nombre original interno, tipo, dimensiones, tamaño,
+SHA-256 y fechas. Los bytes permanecen en almacenamiento privado; nunca en columnas
+binarias ni Base64. Los reportes anteriores siguen devolviendo `image: null`.
+
+Configuración adicional (solo ejemplos en `.env.example`):
+
+```ini
+REPORT_IMAGE_STORAGE_PROVIDER=local
+REPORT_IMAGE_STORAGE_PATH=var/uploads
+REPORT_IMAGE_MAX_BYTES=8388608
+```
+
+La ruta relativa se resuelve desde la raíz del backend y `var/` está ignorado.
+Una ruta personalizada también debe permanecer fuera del control de versiones y de
+cualquier directorio público. No montar uploads mediante `StaticFiles`. En despliegue
+se requiere un volumen persistente o un adaptador de almacenamiento remoto.
+Los puertos `ImageStorage`, `ImageProcessor` y `ReportImageRepository` son independientes
+del proveedor; cambiar el adaptador no cambia los casos de uso.
+
+Endpoints con JWT (campo multipart `image`):
+
+| Método | Ruta | Resultado |
+| --- | --- | --- |
+| PUT | `/api/v1/reports/{report_id}/image` | 200, subir o reemplazar |
+| GET | `/api/v1/reports/{report_id}/image` | 200, metadatos seguros |
+| GET | `/api/v1/reports/{report_id}/image/content` | 200, bytes autenticados |
+| DELETE | `/api/v1/reports/{report_id}/image` | 204, eliminación |
+
+Solo el propietario puede modificar la fotografía de un reporte activo. Un participante
+de una coincidencia persistida puede consultar ambas fotos. Un administrador puede
+consultarlas; las escrituras siguen limitadas al propietario. Un tercero recibe 404,
+igual que para una imagen inexistente. Token inválido: 401; cuenta inactiva: 403;
+conflicto de estado: 409; tamaño: 413; formato discordante: 415; archivo inválido: 422.
+
+Se decodifica JPEG, PNG o WebP real, se comprueba la concordancia con MIME y extensión,
+se rechazan archivos vacíos/corruptos/animados y nombres con rutas, se corrige orientación
+y se reencodifican los píxeles eliminando EXIF y otros metadatos. Se rechazan entradas
+superiores a 32 millones de píxeles o 16384 por lado; la salida se limita a 4096 por lado.
+El hash y tamaño corresponden al archivo sanitizado, no necesariamente al original.
+El cuerpo multipart también tiene un límite de recepción. El contenido usa
+`Cache-Control: private, no-store` y `X-Content-Type-Options: nosniff`.
+
+Reportes y resúmenes de coincidencia incluyen `image` con id, report_id, content_type,
+size_bytes, sha256, width, height, created_at y updated_at. Nunca incluyen storage_key,
+rutas físicas ni nombre original. Las coincidencias conservan su lista pública de campos;
+no incorporan información privada del propietario.
+
+El adaptador escribe en un temporal y publica mediante reemplazo atómico. La transacción
+bloquea el reporte; ante fallo de base se elimina el archivo nuevo y se conserva el anterior.
+Después del commit se retira el archivo anterior. Los lectores quedan protegidos del
+reemplazo concurrente por bloqueo compartido. Base y filesystem no constituyen una única
+transacción distribuida: una interrupción del proceso justo después del commit puede dejar
+un archivo obsoleto inaccesible; los backups y una futura reconciliación deben contemplarlo.
+No se pierde la fotografía vigente por un fallo al limpiar un archivo obsoleto.
+
+En Postman: autenticar como propietario, enviar PUT multipart con clave `image` de tipo
+File y luego GET de metadatos/contenido. Repetir la consulta como participante y tercero.
+No publicar fotografías ni tokens de prueba. La prueba de Alembic destructiva solo se
+permite con `TEST_DATABASE_URL` apuntando a una base aislada con `_test` en el nombre.

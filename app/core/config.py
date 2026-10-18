@@ -20,6 +20,14 @@ class Settings(BaseSettings):
     jwt_secret_key: SecretStr | None = Field(default=None, repr=False)
     jwt_algorithm: Literal["HS256"] = "HS256"
     access_token_expire_minutes: int = Field(default=60, gt=0)
+    report_image_storage_provider: Literal["local"] = "local"
+    report_image_storage_path: Path = Path("var/uploads")
+    report_image_max_bytes: int = Field(default=8_388_608, gt=0, le=32_000_000)
+
+    @property
+    def report_image_directory(self) -> Path:
+        path = self.report_image_storage_path
+        return path if path.is_absolute() else BACKEND_DIR / path
 
     model_config = SettingsConfigDict(
         env_file=BACKEND_DIR / ".env",
