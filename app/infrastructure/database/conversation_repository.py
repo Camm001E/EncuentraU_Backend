@@ -119,7 +119,6 @@ class SQLAlchemyConversationRepository:
         ).join(ObjectMatch, Conversation.match_id == ObjectMatch.id)
         query = query.where(
             participant.user_id == user_id,
-            Conversation.status == "active",
             OwnershipClaim.status == "approved",
             ObjectMatch.status == "accepted",
         )

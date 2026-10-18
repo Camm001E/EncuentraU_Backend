@@ -13,7 +13,7 @@ def migration_config() -> Config:
 
 def test_initial_migration_is_importable() -> None:
     script = ScriptDirectory.from_config(migration_config())
-    assert script.get_heads() == ["0004_ownership_chat"]
+    assert script.get_heads() == ["0005_delivery_closure"]
     revision = script.get_revision("0001_postgresql_foundation")
     assert revision.down_revision is None
     assert callable(revision.module.upgrade)
@@ -59,10 +59,10 @@ def test_migration_can_upgrade_downgrade_and_upgrade_again() -> None:
         with engine.connect() as connection:
             config.attributes["connection"] = connection
             command.upgrade(config, "head")
-            assert len(inspect(connection).get_table_names()) == 10
+            assert len(inspect(connection).get_table_names()) == 12
             command.downgrade(config, "base")
             assert inspect(connection).get_table_names() == ["alembic_version"]
             command.upgrade(config, "head")
-            assert len(inspect(connection).get_table_names()) == 10
+            assert len(inspect(connection).get_table_names()) == 12
     finally:
         engine.dispose()

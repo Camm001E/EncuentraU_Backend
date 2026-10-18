@@ -22,11 +22,13 @@ from sqlalchemy import (
     UniqueConstraint,
     Uuid,
     func,
+    or_,
+    select,
     text,
     true,
 )
 from sqlalchemy.dialects.postgresql import JSONB
-from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.orm import Mapped, column_property, mapped_column, relationship
 
 from app.infrastructure.database.base import Base
 
@@ -334,3 +336,131 @@ class Message(UUIDPrimaryKey, CreatedAt, Base):
     sender_id: Mapped[UUID] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"))
     client_message_id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True))
     body: Mapped[str] = mapped_column(Text)
+
+
+class Delivery(UUIDPrimaryKey, Timestamps, Base):
+    __tablename__ = "deliveries"
+    __table_args__ = (
+        UniqueConstraint("match_id"),
+        UniqueConstraint("claim_id"),
+        UniqueConstraint("conversation_id"),
+        ForeignKeyConstraint(
+            ["claim_id", "match_id"],
+            ["ownership_claims.id", "ownership_claims.match_id"],
+            name="fk_deliveries_claim_match",
+            ondelete="RESTRICT",
+        ),
+        CheckConstraint(
+            "status IN ('coordinating', 'awaiting_confirmations', "
+            "'awaiting_admin', 'disputed', 'completed')",
+            name="status",
+        ),
+        CheckConstraint(
+            "(status = 'coordinating' AND claimant_confirmed_at IS NULL "
+            "AND custodian_confirmed_at IS NULL) OR  "
+            "(status = 'awaiting_confirmations' AND "
+            "((claimant_confirmed_at IS NULL AND custodian_confirmed_at "
+            "IS NOT NULL) OR (claimant_confirmed_at IS NOT NULL AND "
+            "custodian_confirmed_at IS NULL))) OR  "
+            "(status IN ('awaiting_admin', 'completed') AND "
+            "claimant_confirmed_at IS NOT NULL AND custodian_confirmed_at "
+            "IS NOT NULL) OR status = 'disputed'",
+            name="confirmations",
+        ),
+        CheckConstraint(
+            "(status = 'completed' AND admin_id IS NOT NULL AND "
+            "completed_at IS NOT NULL) OR (status <> 'completed' AND "
+            "completed_at IS NULL)",
+            name="completion",
+        ),
+        CheckConstraint(
+            "(status = 'disputed' AND dispute_raised_by_user_id IS NOT "
+            "NULL AND dispute_reason IS NOT NULL AND "
+            "length(trim(dispute_reason)) BETWEEN 10 AND 2000) OR (status "
+            "<> 'disputed' AND dispute_raised_by_user_id IS NULL AND "
+            "dispute_reason IS NULL)",
+            name="dispute",
+        ),
+        CheckConstraint(
+            "admin_note IS NULL OR length(trim(admin_note)) BETWEEN 1 AND 2000",
+            name="note_length",
+        ),
+        Index("ix_deliveries_status_created_at", "status", "created_at", "id"),
+        Index("ix_deliveries_created_at", "created_at"),
+    )
+    match_id: Mapped[UUID] = mapped_column(
+        ForeignKey("object_matches.id", ondelete="RESTRICT")
+    )
+    claim_id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True))
+    conversation_id: Mapped[UUID] = mapped_column(
+        ForeignKey("conversations.id", ondelete="RESTRICT")
+    )
+    status: Mapped[str] = mapped_column(
+        String(24), default="coordinating", server_default="coordinating"
+    )
+    claimant_confirmed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True)
+    )
+    custodian_confirmed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True)
+    )
+    dispute_raised_by_user_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="RESTRICT")
+    )
+    dispute_reason: Mapped[str | None] = mapped_column(Text)
+    admin_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="RESTRICT")
+    )
+    admin_note: Mapped[str | None] = mapped_column(Text)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class DeliveryEvent(UUIDPrimaryKey, CreatedAt, Base):
+    __tablename__ = "delivery_events"
+    __table_args__ = (
+        CheckConstraint(
+            "event_type IN ('delivery_created', 'custodian_confirmed', "
+            "'claimant_confirmed', 'dispute_opened', 'admin_reopened', "
+            "'admin_completed')",
+            name="event_type",
+        ),
+        CheckConstraint(
+            "note IS NULL OR length(trim(note)) BETWEEN 1 AND 2000", name="note_length"
+        ),
+        Index(
+            "ix_delivery_events_delivery_created_id", "delivery_id", "created_at", "id"
+        ),
+    )
+    delivery_id: Mapped[UUID] = mapped_column(
+        ForeignKey("deliveries.id", ondelete="RESTRICT")
+    )
+    actor_user_id: Mapped[UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="RESTRICT")
+    )
+    event_type: Mapped[str] = mapped_column(String(24))
+    note: Mapped[str | None] = mapped_column(Text)
+
+
+# Read-only derived permission, returned only in owner report contracts. It is
+# fetched with the report query, without adding a column or per-report queries.
+ObjectReport.__mapper__.add_property(
+    "evidence_locked",
+    column_property(
+        select(func.count())
+        .select_from(OwnershipClaim)
+        .join(
+            ObjectMatch,
+            ObjectMatch.id == OwnershipClaim.match_id,
+        )
+        .where(
+            OwnershipClaim.status.in_(["pending", "approved"]),
+            or_(
+                ObjectMatch.lost_report_id == ObjectReport.id,
+                ObjectMatch.found_report_id == ObjectReport.id,
+            ),
+        )
+        .correlate_except(OwnershipClaim, ObjectMatch)
+        .scalar_subquery()
+        > 0
+    ),
+)

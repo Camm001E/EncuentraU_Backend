@@ -20,6 +20,10 @@ from app.domain.object_reports import (
     ReportStatus,
     ReportType,
 )
+from app.infrastructure.database.evidence_guard import (
+    require_mutable_evidence,
+    workflow_gate,
+)
 from app.infrastructure.database.models import ImageAnalysis as AnalysisModel
 from app.infrastructure.database.models import ObjectReport as ReportModel
 from app.infrastructure.database.report_image_repository import image_reference
@@ -39,6 +43,7 @@ class SQLAlchemyObjectReportRepository:
             user_id=model.user_id,
             report_type=ReportType(model.report_type),
             status=ReportStatus(model.status),
+            evidence_locked=model.evidence_locked,
             attributes=ReportAttributes(
                 **{name: getattr(model, name) for name in ATTRIBUTE_FIELDS}
             ),
@@ -149,6 +154,7 @@ class SQLAlchemyObjectReportRepository:
 
     def _write(self, report: ObjectReport, *, cancel: bool = False) -> ObjectReport:
         try:
+            workflow_gate(self.session)
             # Recheck ownership, status and version under a row lock. In particular,
             # a concurrent cancellation cannot be overwritten by an earlier PATCH.
             model = self.session.scalar(
@@ -166,6 +172,7 @@ class SQLAlchemyObjectReportRepository:
                 raise ReportNotFoundError
             if model.status != ReportStatus.ACTIVE.value:
                 raise ReportNotActiveError
+            require_mutable_evidence(self.session, report.id)
             if model.updated_at != report.updated_at:
                 raise ReportConflictError
             if not cancel:

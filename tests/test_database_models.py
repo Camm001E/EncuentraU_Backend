@@ -95,6 +95,8 @@ def test_metadata_contains_all_tables_and_no_binary_image_columns(engine) -> Non
         "conversations",
         "conversation_participants",
         "messages",
+        "deliveries",
+        "delivery_events",
     }
     for table in Base.metadata.tables.values():
         if table.name == "conversation_participants":
