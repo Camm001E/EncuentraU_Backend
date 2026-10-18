@@ -18,6 +18,10 @@ MAX_NOTE_LENGTH = 2000
 MAX_MESSAGE_LENGTH = 2000
 DEFAULT_PAGE_LIMIT = 20
 MAX_PAGE_LIMIT = 100
+EVIDENCE_PROTECTED_MESSAGE = (
+    "El reporte y su fotografía están protegidos mientras se revisa "
+    "o coordina una reclamación."
+)
 
 
 class ClaimStatus(StrEnum):
@@ -184,10 +188,10 @@ class ConversationAccess:
     participants: tuple[UUID, ...] = field(repr=False)
     approved: bool
 
-    def authorize(self, user: User) -> None:
+    def authorize(self, user: User, *, write: bool = False) -> None:
         if not user.is_active or user.id not in self.participants or not self.approved:
             raise WorkflowNotFound
-        if self.status != ConversationStatus.ACTIVE:
+        if write and self.status != ConversationStatus.ACTIVE:
             raise WorkflowConflict
 
 

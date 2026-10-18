@@ -36,7 +36,8 @@ from app.infrastructure.database.report_image_repository import image_reference
 # Generations can start at either end of a pair. A transaction-level gate gives
 # upsert and stale-pair cleanup a consistent order across concurrent requests.
 # This deliberately favors correctness over parallel generation throughput.
-GENERATION_LOCK_KEY = int.from_bytes(b"EUmatch1", "big")
+from app.infrastructure.database.workflow_lock import GENERATION_LOCK_KEY
+
 METRIC_FIELDS = (
     "percentage",
     "identity_percentage",

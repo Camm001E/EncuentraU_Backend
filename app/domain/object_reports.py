@@ -218,6 +218,7 @@ class ObjectReport:
     image: ImageReference | None = None
     created_at: datetime | None = None
     updated_at: datetime | None = None
+    evidence_locked: bool = False
 
 
 @dataclass(frozen=True, slots=True)

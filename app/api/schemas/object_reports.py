@@ -145,6 +145,7 @@ class ReportResponse(BaseModel):
     private_feature: str | None
     analysis: AnalysisResponse | None
     image: ReportImageResponse | None = None
+    evidence_locked: bool = False
     created_at: datetime
     updated_at: datetime
 
@@ -156,6 +157,7 @@ class ReportResponse(BaseModel):
             user_id=report.user_id,
             report_type=report.report_type,
             status=report.status,
+            evidence_locked=report.evidence_locked,
             **asdict(report.attributes),
             created_at=report.created_at,
             updated_at=report.updated_at,
