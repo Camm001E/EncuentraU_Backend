@@ -226,4 +226,7 @@ class SQLAlchemyOwnershipClaimRepository:
             ]
         )
         self.session.flush()
+        from app.infrastructure.database.delivery_repository import add_delivery
+
+        add_delivery(self.session, claim, identifier)
         return identifier
