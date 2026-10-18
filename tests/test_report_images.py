@@ -190,3 +190,26 @@ def test_image_configuration_defaults_and_invalid_limits():
         Settings(_env_file=None, report_image_max_bytes=0)
     with pytest.raises(ValidationError):
         Settings(_env_file=None, report_image_storage_provider="public-static")
+
+
+def test_failed_storage_write_does_not_delete_a_preexisting_object(tmp_path):
+    storage = LocalImageStorage(tmp_path)
+    owner = User(uuid4(), "Owner", "owner@example.com", "OWNER", "unused")
+    report_id = uuid4()
+    now = datetime.now(UTC)
+    ref = ImageReference(uuid4(), report_id, "image/png", 3, "0" * 64, 20, 12, now, now)
+    key_id = uuid4()
+    old = ReportImage(ref, key_id.hex + ".png", "old.png")
+    storage.write(old.storage_key, b"old")
+
+    @contextmanager
+    def transaction(*_args, **_kwargs):
+        yield ImageAccess(owner.id, "active", False, old)
+
+    repository = Mock(transaction=transaction)
+    service = ReportImageService(repository, storage, PillowImageProcessor(8_388_608))
+    with patch("app.application.report_images.uuid4", return_value=key_id):
+        with pytest.raises(ImageUnavailableError):
+            service.upload(report_id, owner, photo(), "new.png", "image/png")
+    repository.save.assert_not_called()
+    assert storage.read(old.storage_key) == b"old"
