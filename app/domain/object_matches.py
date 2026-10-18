@@ -5,6 +5,7 @@ from uuid import UUID
 
 from app.domain.matching import MatchEvaluation
 from app.domain.object_reports import ReportStatus, ReportType
+from app.domain.report_images import ImageReference
 
 MAX_MATCH_DAYS = 14
 MIN_MATCH_PERCENTAGE = 60
@@ -50,6 +51,7 @@ class ReportSummary:
     description: str
     location: str
     event_date: date
+    image: ImageReference | None = None
 
 
 @dataclass(frozen=True, slots=True)

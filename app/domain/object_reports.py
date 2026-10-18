@@ -9,6 +9,8 @@ from enum import StrEnum
 from typing import Any
 from uuid import UUID
 
+from app.domain.report_images import ImageReference
+
 
 class ReportType(StrEnum):
     LOST = "lost"
@@ -213,6 +215,7 @@ class ObjectReport:
     attributes: ReportAttributes
     status: ReportStatus = ReportStatus.ACTIVE
     analysis: ImageAnalysis | None = None
+    image: ImageReference | None = None
     created_at: datetime | None = None
     updated_at: datetime | None = None
 

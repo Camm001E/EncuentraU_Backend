@@ -12,6 +12,7 @@ from sqlalchemy import (
     Date,
     DateTime,
     ForeignKey,
+    Integer,
     Numeric,
     SmallInteger,
     String,
@@ -106,6 +107,12 @@ class ObjectReport(UUIDPrimaryKey, Timestamps, Base):
     analyses: Mapped[list[ImageAnalysis]] = relationship(
         back_populates="report", cascade="all, delete-orphan", passive_deletes=True
     )
+    image: Mapped[ReportImage | None] = relationship(
+        back_populates="report",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+        uselist=False,
+    )
     lost_matches: Mapped[list[ObjectMatch]] = relationship(
         back_populates="lost_report",
         foreign_keys="ObjectMatch.lost_report_id",
@@ -133,6 +140,35 @@ class ImageAnalysis(UUIDPrimaryKey, CreatedAt, Base):
     confidence: Mapped[str] = mapped_column(String(10))
 
     report: Mapped[ObjectReport] = relationship(back_populates="analyses")
+
+
+class ReportImage(UUIDPrimaryKey, Timestamps, Base):
+    __tablename__ = "report_images"
+    __table_args__ = (
+        UniqueConstraint("report_id"),
+        UniqueConstraint("storage_key"),
+        CheckConstraint(
+            "content_type IN ('image/jpeg', 'image/png', 'image/webp')",
+            name="content_type",
+        ),
+        CheckConstraint("size_bytes > 0", name="positive_size"),
+        CheckConstraint(
+            "width BETWEEN 1 AND 4096 AND height BETWEEN 1 AND 4096", name="dimensions"
+        ),
+        CheckConstraint("length(sha256) = 64", name="sha256_length"),
+    )
+
+    report_id: Mapped[UUID] = mapped_column(
+        ForeignKey("object_reports.id", ondelete="CASCADE")
+    )
+    storage_key: Mapped[str] = mapped_column(String(100))
+    original_filename: Mapped[str] = mapped_column(String(255))
+    content_type: Mapped[str] = mapped_column(String(20))
+    size_bytes: Mapped[int] = mapped_column(Integer)
+    sha256: Mapped[str] = mapped_column(String(64))
+    width: Mapped[int] = mapped_column(Integer)
+    height: Mapped[int] = mapped_column(Integer)
+    report: Mapped[ObjectReport] = relationship(back_populates="image")
 
 
 class ObjectMatch(UUIDPrimaryKey, Timestamps, Base):
