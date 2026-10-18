@@ -89,6 +89,7 @@ def test_metadata_contains_all_tables_and_no_binary_image_columns(engine) -> Non
         "users",
         "object_reports",
         "image_analyses",
+        "report_images",
         "object_matches",
     }
     for table in Base.metadata.tables.values():

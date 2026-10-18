@@ -14,6 +14,7 @@ from pydantic import (
     model_validator,
 )
 
+from app.api.schemas.report_images import ReportImageResponse
 from app.domain.object_reports import (
     MAX_COLORS,
     NULLABLE_FIELDS,
@@ -143,6 +144,7 @@ class ReportResponse(BaseModel):
     event_date: date
     private_feature: str | None
     analysis: AnalysisResponse | None
+    image: ReportImageResponse | None = None
     created_at: datetime
     updated_at: datetime
 
@@ -157,6 +159,9 @@ class ReportResponse(BaseModel):
             **asdict(report.attributes),
             created_at=report.created_at,
             updated_at=report.updated_at,
+            image=ReportImageResponse.from_reference(report.image)
+            if report.image
+            else None,
             analysis=(
                 AnalysisResponse(
                     id=analysis.id,
