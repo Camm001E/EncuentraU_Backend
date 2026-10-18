@@ -6,6 +6,7 @@ from starlette.concurrency import run_in_threadpool
 
 from app.api.auth_errors import AuthRoute
 from app.api.dependencies.authentication import get_current_user
+from app.api.dependencies.privacy import private_response
 from app.api.dependencies.report_images import get_report_image_service
 from app.api.schemas.report_images import ReportImageResponse
 from app.application.report_images import ReportImageService
@@ -13,7 +14,12 @@ from app.core.config import Settings, get_settings
 from app.domain.report_images import ImageTooLargeError
 from app.domain.users import User
 
-router = APIRouter(prefix="/reports", tags=["report-images"], route_class=AuthRoute)
+router = APIRouter(
+    prefix="/reports",
+    tags=["report-images"],
+    route_class=AuthRoute,
+    dependencies=[Depends(private_response)],
+)
 CurrentUser = Annotated[User, Depends(get_current_user)]
 Service = Annotated[ReportImageService, Depends(get_report_image_service)]
 UPLOAD_CHUNK_BYTES = 65_536
