@@ -70,8 +70,10 @@ class ReportImageService:
                 access = self._authorize(access, user, write=True)
                 processed = self.processor.process(data, filename, content_type)
                 previous = access.image
-                new_key = f"{uuid4().hex}.{processed.extension}"
-                self.storage.write(new_key, processed.data)
+                candidate_key = f"{uuid4().hex}.{processed.extension}"
+                self.storage.write(candidate_key, processed.data)
+                # Compensate only an object this operation actually wrote.
+                new_key = candidate_key
                 now = datetime.now(UTC)
                 reference = ImageReference(
                     id=previous.reference.id if previous else uuid4(),
