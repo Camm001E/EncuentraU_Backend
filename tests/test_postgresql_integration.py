@@ -47,6 +47,7 @@ def test_postgresql_migrations_constraints_json_and_health(monkeypatch) -> None:
                     "users",
                     "object_reports",
                     "image_analyses",
+                    "report_images",
                     "object_matches",
                     "alembic_version",
                 }

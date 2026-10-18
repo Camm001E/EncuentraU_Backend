@@ -4,6 +4,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict
 
+from app.api.schemas.report_images import ReportImageResponse
 from app.domain.matching import MatchFactor, MatchLevel
 from app.domain.object_matches import (
     GeneratedMatches,
@@ -29,6 +30,7 @@ class ReportSummaryResponse(BaseModel):
     description: str
     location: str
     event_date: date
+    image: ReportImageResponse | None = None
 
 
 class ObjectMatchResponse(BaseModel):
