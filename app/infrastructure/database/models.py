@@ -30,6 +30,11 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, column_property, mapped_column, relationship
 
+from app.domain.matching_version import (
+    CURRENT_SCORING_VERSION,
+    LEGACY_SCORING_VERSION,
+    SCORING_VERSION_MAX_LENGTH,
+)
 from app.infrastructure.database.base import Base
 
 JSON_DATA = JSON().with_variant(JSONB(), "postgresql")
@@ -205,6 +210,11 @@ class ObjectMatch(UUIDPrimaryKey, Timestamps, Base):
     evidence_coverage: Mapped[Decimal] = mapped_column(Numeric(5, 2))
     compatible: Mapped[bool] = mapped_column(Boolean)
     level: Mapped[str] = mapped_column(String(16))
+    scoring_version: Mapped[str] = mapped_column(
+        String(SCORING_VERSION_MAX_LENGTH),
+        default=CURRENT_SCORING_VERSION,
+        server_default=LEGACY_SCORING_VERSION,
+    )
     factors: Mapped[list[dict[str, Any]]] = mapped_column(
         JSON_DATA, default=list, server_default=text("'[]'")
     )

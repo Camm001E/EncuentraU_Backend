@@ -4,6 +4,7 @@ from enum import StrEnum
 from uuid import UUID
 
 from app.domain.matching import MatchEvaluation
+from app.domain.matching_version import CURRENT_SCORING_VERSION
 from app.domain.object_reports import ReportStatus, ReportType
 from app.domain.report_images import ImageReference
 
@@ -59,6 +60,7 @@ class MatchProposal:
     lost_report_id: UUID
     found_report_id: UUID
     evaluation: MatchEvaluation
+    scoring_version: str = CURRENT_SCORING_VERSION
 
 
 @dataclass(frozen=True, slots=True)
@@ -70,6 +72,7 @@ class ObjectMatch:
     updated_at: datetime
     my_report: ReportSummary
     candidate_report: ReportSummary
+    scoring_version: str = CURRENT_SCORING_VERSION
 
 
 @dataclass(frozen=True, slots=True)

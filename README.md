@@ -205,28 +205,38 @@ Los estados siguen siendo `match`, `partial`, `different` y `unknown`.
 
 ### Reglas de comparación
 
-- Las comparaciones por palabras usan intersección dividida por unión (Jaccard).
-  Se normalizan mayúsculas, tildes y puntuación, y se omiten artículos y
-  preposiciones. Hay equivalencias explícitas para singular/plural y variantes
-  como auriculares/audífonos, Bluetooth/inalámbricos, copa/copas,
-  almohadilla/almohadillas y acolchado/acolchada/acolchados/acolchadas.
+- El vocabulario compartido, la normalización y la comparación son módulos
+  puros del dominio; el servicio conserva únicamente la composición y la política
+  de puntuación. Se normalizan Unicode, tildes, flexiones y sinónimos.
+  El tipo usa intersección dividida por el conjunto menor (solapamiento simétrico):
+  una expresión más específica puede contener el concepto de la otra. Compartir
+  solo adjetivos, material o color no hace compatibles dos tipos distintos.
 - Categoría y marca requieren igualdad del texto normalizado.
 - El color principal representa el 60% del factor; los conjuntos de colores
-  secundarios se comparan con Jaccard para el 40% restante. Si los secundarios
+  secundarios se comparan por solapamiento para el 40% restante. Un color no
+  observado desde otro ángulo no demuestra su ausencia. Si los secundarios
   no se pueden comparar, solo se evalúan los 9 puntos del principal. Si solo
   se conocen los secundarios, se evalúan sus 6 puntos. Los componentes ausentes
   reducen la cobertura y no se registran como diferencias. Por eso el ejemplo
   anterior, sin secundarios comparables, tiene cobertura de 95,2%. Dos conjuntos
   secundarios conocidos y disjuntos generan una advertencia.
-- La forma tiene su propio factor. Los rasgos y el texto visible se comparan
-  como características independientes: cada una busca su mejor correspondencia
-  por palabras en el otro objeto y se promedian ambas direcciones. Se eliminan
-  duplicados y se conserva la simetría; juntar palabras de distintos atributos
-  no equivale a describir el mismo rasgo.
-- La descripción excluye los tokens de ambos lugares y palabras de reporte
-  como perdí, perdido, encontré, encontrado, hallado y extraviado, con sus
-  variantes. Una descripción que solo contiene esos datos queda como `unknown`.
-- El lugar usa similitud de palabras. La fecha aporta 100% si es el mismo día;
+- La forma solo compara geometría reconocible. Un tipo, categoría o pieza usado
+  como forma queda `unknown`, sin puntos ni peso evaluable. El analizador también
+  solicita geometría breve o `null` para las próximas fotografías.
+- Cada rasgo conserva su núcleo, atributos, región, colores, cantidades y
+  negación. Busca su mejor candidato y se promedian las dos direcciones.
+  Duplicados normalizados no añaden evidencia. La información de cada rasgo
+  pondera ese promedio: una unidad base, una por color o cantidad distintos y
+  una por núcleo distintivo (daño, costura, cierre, parche, etc.). Esta ponderación
+  interna no cambia los pesos de los nueve factores ni la fórmula 80/20.
+  Colores, cantidades, geometrías o negaciones incompatibles siguen evaluables
+  y generan explicaciones. Texto visible desconocido no penaliza; dos textos
+  conocidos diferentes sí reducen el factor visual y producen advertencia.
+- La descripción elimina tipo, categoría, lugar, fechas y palabras de reporte.
+  Compara observaciones distintivas, no una bolsa de palabras de contexto.
+  Repetir solamente tipo y color principal no constituye evidencia descriptiva
+  independiente: el factor queda `unknown` y su ausencia reduce la cobertura.
+- El lugar mantiene Jaccard. La fecha aporta 100% si es el mismo día;
   75% entre 1 y 3 días después; 50% entre 4 y 7; 25% entre 8 y 14. Un hallazgo
   anterior a la pérdida o posterior a los 14 días aporta cero y sigue siendo
   evaluable. Las fechas invertidas generan una advertencia.
@@ -255,6 +265,11 @@ obtenidos de los análisis de Gemini: mismo objeto desde otro ángulo, objeto
 parecido y objeto diferente. En todos se fijó deliberadamente el mismo lugar y
 la fecha `2026-10-16`. Las pruebas reproducen esas entradas sin enviar imágenes
 ni consumir nuevas llamadas a Gemini.
+`observed_views.json` añade seis análisis sanitizados desde distintos ángulos,
+sin imágenes, rutas, identidades ni credenciales. Las regresiones verifican
+ordenamiento y separación de candidatos; también hay pruebas independientes de
+mochilas, botellas y llaves. El vocabulario es finito y una coincidencia textual
+alta no demuestra propiedad ni sustituye la revisión de evidencia privada.
 
 Para comparar análisis reales, copia únicamente los atributos del objeto desde
 `/api/v1/ai/analyze` y añade `location`, `event_date` y `description` del reporte.
@@ -265,6 +280,26 @@ evaluar coincidencias. Las pruebas del motor usan datos controlados y no validan
 el reconocimiento de fotografías reales.
 
 ## Base técnica de PostgreSQL
+
+### Procedencia de las puntuaciones persistidas
+
+`object_matches.scoring_version` identifica el algoritmo que produjo las métricas.
+La migración `0006_match_scoring_version` marca las filas anteriores como
+`legacy-v1` sin recalcularlas ni modificar su estado o fechas. Las propuestas
+nuevas guardan `semantic-v2`; ambos identificadores se centralizan en
+`app/domain/matching_version.py`. Un escritor que omita la versión conserva el
+valor seguro `legacy-v1`, evitando atribuirle un cálculo nuevo sin evidencia.
+
+Volver a generar recalcula las parejas `pending` sin reclamación, actualiza sus
+métricas y versión, y conserva ID y `created_at`. Las pendientes insuficientes
+se retiran; repetir la operación no duplica parejas. Las reclamaciones protegen
+la evidencia y las parejas `accepted`/`rejected` conservan su cálculo histórico,
+incluida la versión. Un caso cerrado sigue protegido y no se reabre al generar.
+
+Listado, detalle y generación devuelven `scoring_version` como metadato adicional.
+`POST /api/v1/matches/evaluate` conserva su contrato. La migración es reversible;
+debe aplicarse antes de ejecutar esta versión sobre una base existente. Las
+pruebas y el recálculo de auditoría usan exclusivamente PostgreSQL temporal.
 
 La infraestructura está en `app/infrastructure/database/`: base declarativa,
 modelos SQLAlchemy 2, engine con psycopg 3 y fábrica de sesiones. El dominio no
