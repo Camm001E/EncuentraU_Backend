@@ -13,7 +13,7 @@ def migration_config() -> Config:
 
 def test_initial_migration_is_importable() -> None:
     script = ScriptDirectory.from_config(migration_config())
-    assert script.get_heads() == ["0005_delivery_closure"]
+    assert script.get_heads() == ["0006_match_scoring_version"]
     revision = script.get_revision("0001_postgresql_foundation")
     assert revision.down_revision is None
     assert callable(revision.module.upgrade)

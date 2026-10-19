@@ -162,6 +162,7 @@ class SQLAlchemyObjectMatchRepository:
                 lost_report_id=proposal.lost_report_id,
                 found_report_id=proposal.found_report_id,
                 status=MatchStatus.PENDING,
+                scoring_version=proposal.scoring_version,
                 **metrics,
             )
             self.session.execute(
@@ -173,6 +174,7 @@ class SQLAlchemyObjectMatchRepository:
                             for name in METRIC_FIELDS
                         },
                         "updated_at": func.clock_timestamp(),
+                        "scoring_version": statement.excluded.scoring_version,
                     },
                     where=(MatchModel.status == MatchStatus.PENDING)
                     & ~select(ClaimModel.id)
@@ -236,6 +238,7 @@ class SQLAlchemyObjectMatchRepository:
             updated_at=match.updated_at,
             my_report=cls._summary(mine),
             candidate_report=cls._summary(candidate),
+            scoring_version=match.scoring_version,
         )
 
     def list_by_user(

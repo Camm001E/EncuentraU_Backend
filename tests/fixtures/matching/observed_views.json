@@ -1,0 +1,170 @@
+[
+  {
+    "analysis": {
+      "object_detected": true,
+      "object_type": "audífonos de diadema",
+      "category": "electronica",
+      "primary_color": "negro",
+      "secondary_colors": [
+        "azul",
+        "plateado"
+      ],
+      "brand": null,
+      "shape": "arqueada",
+      "visible_features": [
+        "aro azul en las almohadillas",
+        "parche azul con costura en la diadema",
+        "símbolo en forma de v plateada",
+        "botones de control de volumen y encendido"
+      ],
+      "visible_text": [],
+      "image_quality": "buena",
+      "confidence": "alta",
+      "requires_another_photo": false,
+      "warnings": []
+    },
+    "description": "Perdí unos audífonos negros con aro azul, parche azul cosido y un pequeño rayón plateado en forma de V."
+  },
+  {
+    "analysis": {
+      "object_detected": true,
+      "object_type": "auriculares de diadema",
+      "category": "electronica",
+      "primary_color": "negro",
+      "secondary_colors": [
+        "azul"
+      ],
+      "brand": null,
+      "shape": "arqueada",
+      "visible_features": [
+        "almohadillas acolchadas",
+        "detalles azules en las copas",
+        "parche azul en la diadema",
+        "botones de control laterales",
+        "pequeño símbolo en v en la copa izquierda"
+      ],
+      "visible_text": [],
+      "image_quality": "buena",
+      "confidence": "alta",
+      "requires_another_photo": false,
+      "warnings": []
+    },
+    "description": "Encontré una diadema negra con detalles azules, un parche azul en la banda y una marca plateada en V."
+  },
+  {
+    "analysis": {
+      "object_detected": true,
+      "object_type": "audífonos de diadema",
+      "category": "electronica",
+      "primary_color": "negro",
+      "secondary_colors": [
+        "rojo",
+        "plateado"
+      ],
+      "brand": null,
+      "shape": "arqueada",
+      "visible_features": [
+        "costura roja en la diadema",
+        "aro rojo en las almohadillas",
+        "remache plateado en la bisagra",
+        "botones de control laterales",
+        "almohadillas acolchadas"
+      ],
+      "visible_text": [],
+      "image_quality": "buena",
+      "confidence": "alta",
+      "requires_another_photo": false,
+      "warnings": []
+    },
+    "description": "Perdí audífonos negros con aro rojo, costura roja y remache plateado en la bisagra."
+  },
+  {
+    "analysis": {
+      "object_detected": true,
+      "object_type": "audífonos",
+      "category": "electronica",
+      "primary_color": "negro",
+      "secondary_colors": [
+        "rojo",
+        "plateado"
+      ],
+      "brand": null,
+      "shape": "diadema",
+      "visible_features": [
+        "costuras rojas en la diadema",
+        "líneas rojas decorativas",
+        "pieza circular plateada en la unión",
+        "almohadillas acolchadas",
+        "botones de control laterales"
+      ],
+      "visible_text": [],
+      "image_quality": "buena",
+      "confidence": "alta",
+      "requires_another_photo": false,
+      "warnings": []
+    },
+    "description": "Encontré audífonos negros con líneas rojas, costuras rojas y una pieza circular plateada cerca de la unión."
+  },
+  {
+    "analysis": {
+      "object_detected": true,
+      "object_type": "calculadora",
+      "category": "electronica",
+      "primary_color": "gris",
+      "secondary_colors": [
+        "turquesa",
+        "amarillo"
+      ],
+      "brand": null,
+      "shape": "rectangular",
+      "visible_features": [
+        "pantalla digital",
+        "panel solar",
+        "teclas numéricas y científicas",
+        "tres teclas turquesa",
+        "una tecla amarilla",
+        "raspón diagonal"
+      ],
+      "visible_text": [
+        "sin",
+        "cos",
+        "ln",
+        "m+",
+        "m-"
+      ],
+      "image_quality": "buena",
+      "confidence": "alta",
+      "requires_another_photo": false,
+      "warnings": []
+    },
+    "description": "Perdí una calculadora gris con tres teclas turquesa, una tecla amarilla y un raspón diagonal."
+  },
+  {
+    "analysis": {
+      "object_detected": true,
+      "object_type": "calculadora científica",
+      "category": "electronica",
+      "primary_color": "gris oscuro",
+      "secondary_colors": [
+        "turquesa",
+        "amarillo",
+        "gris claro"
+      ],
+      "brand": null,
+      "shape": "rectangular",
+      "visible_features": [
+        "pantalla digital",
+        "panel solar pequeño",
+        "teclas numéricas grises",
+        "teclas de funciones científicas",
+        "desgaste diagonal en la esquina inferior izquierda"
+      ],
+      "visible_text": [],
+      "image_quality": "buena",
+      "confidence": "alta",
+      "requires_another_photo": false,
+      "warnings": []
+    },
+    "description": "Encontré una calculadora científica oscura con teclas turquesa, botón amarillo y desgaste diagonal en una esquina."
+  }
+]
