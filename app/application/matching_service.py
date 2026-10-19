@@ -1,6 +1,9 @@
-import re
-import unicodedata
-
+from app.domain.evidence_comparison import (
+    compare_features,
+    compare_visual,
+    object_type_similarity,
+    overlap,
+)
 from app.domain.matching import (
     MatchableObject,
     MatchEvaluation,
@@ -10,6 +13,14 @@ from app.domain.matching import (
     MatchFactorStatus,
     MatchLevel,
     MatchRequest,
+)
+from app.domain.semantic_normalization import (
+    colour,
+    description_features,
+    features,
+    geometry,
+    normalize,
+    tokens,
 )
 
 
@@ -42,102 +53,33 @@ class MatchingService:
         MatchFactorName.LOCATION: "Lugar",
         MatchFactorName.DATE: "Fecha",
     }
-    _unknown_values = {
-        "desconocido",
-        "desconocida",
-        "no identificado",
-        "no identificada",
-        "no visible",
-        "no legible",
-        "no se distingue",
-        "sin marca",
-        "n a",
-    }
-    _stopwords = {
-        "a",
-        "al",
-        "con",
-        "de",
-        "del",
-        "el",
-        "en",
-        "es",
-        "la",
-        "las",
-        "lo",
-        "los",
-        "para",
-        "por",
-        "que",
-        "se",
-        "su",
-        "un",
-        "una",
-        "unos",
-        "unas",
-        "y",
-    }
-    _report_words = {
-        "perdi",
-        "perdido",
-        "perdida",
-        "perdidos",
-        "perdidas",
-        "encontre",
-        "encontrado",
-        "encontrada",
-        "encontrados",
-        "encontradas",
-        "hallado",
-        "hallada",
-        "hallados",
-        "halladas",
-        "extraviado",
-        "extraviada",
-        "extraviados",
-        "extraviadas",
-    }
-    # Vocabulary normalization only: no object-specific scoring rules.
-    _synonyms = {
-        "audifonos": "audifono",
-        "auricular": "audifono",
-        "auriculares": "audifono",
-        "bluetooth": "inalambrico",
-        "inalambrica": "inalambrico",
-        "inalambricos": "inalambrico",
-        "inalambricas": "inalambrico",
-        "copas": "copa",
-        "detalles": "detalle",
-        "almohadillas": "almohadilla",
-        "acolchada": "acolchado",
-        "acolchados": "acolchado",
-        "acolchadas": "acolchado",
-        "botones": "boton",
-        "uniones": "union",
-        "circumaurales": "circumaural",
-        "intraurales": "intraural",
-        "negra": "negro",
-        "negras": "negro",
-        "negros": "negro",
-        "blanca": "blanco",
-        "blancas": "blanco",
-        "blancos": "blanco",
-        "roja": "rojo",
-        "rojas": "rojo",
-        "rojos": "rojo",
-        "grises": "gris",
-        "azules": "azul",
-        "verdes": "verde",
-        "amarilla": "amarillo",
-        "amarillas": "amarillo",
-        "amarillos": "amarillo",
-    }
+    _high_threshold = 85
+    _possible_threshold = 60
+    _incompatible_ceiling = 29
+    _type_compatibility_threshold = 0.35
 
     def evaluate(self, request: MatchRequest) -> MatchEvaluation:
         lost, found = request.lost, request.found
-        type_similarity = self._text_similarity(lost.object_type, found.object_type)
+        type_similarity = object_type_similarity(lost.object_type, found.object_type)
+        excluded = (
+            tokens(lost.location)
+            | tokens(found.location)
+            | tokens(lost.object_type)
+            | tokens(found.object_type)
+            | tokens(lost.category)
+            | tokens(found.category)
+        )
+        visual = compare_visual(
+            features(lost.visible_features, excluded),
+            features(found.visible_features, excluded),
+            lost.visible_text,
+            found.visible_text,
+        )
+        description = compare_features(
+            description_features(lost.description, excluded),
+            description_features(found.description, excluded),
+        )
         color_similarity, color_weight = self._color_similarity(lost, found)
-        location_tokens = self._tokens(lost.location) | self._tokens(found.location)
         factors = [
             self._factor(MatchFactorName.OBJECT_TYPE, type_similarity),
             self._factor(
@@ -151,18 +93,15 @@ class MatchingService:
             ),
             self._factor(
                 MatchFactorName.SHAPE,
-                self._text_similarity(lost.shape, found.shape),
+                overlap(geometry(lost.shape), geometry(found.shape)),
             ),
             self._factor(
                 MatchFactorName.VISUAL_FEATURES,
-                self._feature_similarity(lost, found),
+                visual.similarity,
             ),
             self._factor(
                 MatchFactorName.DESCRIPTION,
-                self._set_similarity(
-                    self._description_tokens(lost.description, location_tokens),
-                    self._description_tokens(found.description, location_tokens),
-                ),
+                description.similarity,
             ),
             self._factor(
                 MatchFactorName.LOCATION,
@@ -174,20 +113,43 @@ class MatchingService:
             factors, MatchFactorGroup.IDENTITY
         )
         context, context_weight = self._group_result(factors, MatchFactorGroup.CONTEXT)
-        compatible = type_similarity is None or type_similarity >= 0.35
+        compatible = (
+            type_similarity is None
+            or type_similarity >= self._type_compatibility_threshold
+        )
         percentage = round(
             identity * self._identity_share + context * self._context_share
         )
         if not compatible:
-            percentage = min(percentage, 29)
-        if compatible and percentage >= 85:
+            percentage = min(percentage, self._incompatible_ceiling)
+        if compatible and percentage >= self._high_threshold:
             level = MatchLevel.HIGH
-        elif compatible and percentage >= 60:
+        elif compatible and percentage >= self._possible_threshold:
             level = MatchLevel.POSSIBLE
         else:
             level = MatchLevel.LOW
 
-        warnings = []
+        for factor in factors:
+            if (
+                factor.name == MatchFactorName.SHAPE
+                and factor.status == MatchFactorStatus.UNKNOWN
+            ):
+                factor.explanation = (
+                    "Sin geometría comparable: una pieza o un tipo de objeto "
+                    "no demuestra una forma. Se excluye del máximo evaluable."
+                )
+            if factor.name in {
+                MatchFactorName.VISUAL_FEATURES,
+                MatchFactorName.DESCRIPTION,
+            }:
+                comparison = (
+                    visual
+                    if factor.name == MatchFactorName.VISUAL_FEATURES
+                    else description
+                )
+                if comparison.contradictions:
+                    factor.explanation += " " + " ".join(comparison.contradictions)
+        warnings = sorted(set(visual.contradictions + description.contradictions))
         if not compatible:
             warnings.append("Tipos de objeto incompatibles: similitud inferior al 35%.")
         lost_secondary = self._colors(lost.secondary_colors)
@@ -292,89 +254,38 @@ class MatchingService:
             explanation=explanation,
         )
 
-    @classmethod
-    def _normalize(cls, value: str | None) -> str:
-        decomposed = unicodedata.normalize("NFKD", value or "").casefold()
-        unaccented = "".join(c for c in decomposed if not unicodedata.combining(c))
-        normalized = re.sub(r"[^a-z0-9]+", " ", unaccented).strip()
-        return "" if normalized in cls._unknown_values else normalized
-
-    @classmethod
-    def _tokens(cls, value: str | None) -> set[str]:
-        return {
-            cls._synonyms.get(word, word)
-            for word in cls._normalize(value).split()
-            if word not in cls._stopwords
-        }
+    _normalize = staticmethod(normalize)
+    _tokens = staticmethod(tokens)
 
     @staticmethod
-    def _set_similarity(left: set[str], right: set[str]) -> float | None:
+    def _set_similarity(left: frozenset, right: frozenset) -> float | None:
         if not left or not right:
             return None
         return len(left & right) / len(left | right)
 
     @classmethod
     def _text_similarity(cls, left: str | None, right: str | None) -> float | None:
-        return cls._set_similarity(cls._tokens(left), cls._tokens(right))
+        return cls._set_similarity(tokens(left), tokens(right))
 
-    @classmethod
-    def _exact_similarity(cls, left: str | None, right: str | None) -> float | None:
-        normalized_left, normalized_right = cls._normalize(left), cls._normalize(right)
-        if not normalized_left or not normalized_right:
-            return None
-        return float(normalized_left == normalized_right)
+    @staticmethod
+    def _exact_similarity(left: str | None, right: str | None) -> float | None:
+        a, b = normalize(left), normalize(right)
+        return float(a == b) if a and b else None
 
-    @classmethod
-    def _description_tokens(cls, value: str | None, locations: set[str]) -> set[str]:
-        return cls._tokens(value) - locations - cls._report_words
-
-    @classmethod
-    def _feature_similarity(
-        cls, lost: MatchableObject, found: MatchableObject
-    ) -> float | None:
-        # Preserve feature boundaries instead of mixing all words into one bag.
-        left = {
-            frozenset(tokens)
-            for value in [*lost.visible_features, *lost.visible_text]
-            if (tokens := cls._tokens(value))
-        }
-        right = {
-            frozenset(tokens)
-            for value in [*found.visible_features, *found.visible_text]
-            if (tokens := cls._tokens(value))
-        }
-        if not left or not right:
-            return None
-        forward = sum(max(len(a & b) / len(a | b) for b in right) for a in left) / len(
-            left
-        )
-        backward = sum(max(len(a & b) / len(a | b) for a in left) for b in right) / len(
-            right
-        )
-        return (forward + backward) / 2
-
-    @classmethod
-    def _colors(cls, values: list[str]) -> set[str]:
-        return {
-            " ".join(sorted(tokens))
-            for value in values
-            if (tokens := cls._tokens(value))
-        }
+    @staticmethod
+    def _colors(values: list[str]) -> frozenset[frozenset[str]]:
+        return frozenset(c for value in values if (c := colour(value)))
 
     @classmethod
     def _color_similarity(
         cls, lost: MatchableObject, found: MatchableObject
     ) -> tuple[float | None, float]:
-        primary = cls._exact_similarity(
-            " ".join(sorted(cls._tokens(lost.primary_color))),
-            " ".join(sorted(cls._tokens(found.primary_color))),
-        )
-        secondary = cls._set_similarity(
+        primary = overlap(colour(lost.primary_color), colour(found.primary_color))
+        secondary = overlap(
             cls._colors(lost.secondary_colors), cls._colors(found.secondary_colors)
         )
         weight = cls._identity_weights[MatchFactorName.COLOR]
-        points = 0.0
-        evaluable = 0.0
+        points = evaluable = 0.0
         for similarity, share in ((primary, 0.6), (secondary, 0.4)):
             if similarity is not None:
                 evaluable += weight * share

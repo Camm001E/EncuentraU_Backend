@@ -31,14 +31,17 @@ def _factor(result: MatchEvaluation, name: MatchFactorName) -> MatchFactor:
 
 
 def _identical_request() -> MatchRequest:
-    obj = _request().lost
+    # Isolate scoring policy with actual descriptive evidence, beyond type/color.
+    obj = _request().lost.model_copy(
+        update={"description": "Etiqueta cosida junto al cierre."}
+    )
     return MatchRequest(lost=obj, found=obj)
 
 
 @pytest.mark.parametrize(
     ("case", "level", "minimum", "maximum", "compatible"),
     [
-        ("same_object", MatchLevel.HIGH, 85, 92, True),
+        ("same_object", MatchLevel.HIGH, 85, 100, True),
         ("similar_object", MatchLevel.POSSIBLE, 60, 84, True),
         ("different_object", MatchLevel.LOW, 0, 29, False),
     ],
@@ -52,7 +55,8 @@ def test_saved_gemini_results(
     assert minimum <= result.percentage <= maximum
     assert result.compatible is compatible
     assert result.context_percentage == 100
-    assert result.evidence_coverage == 92
+    # These original descriptions repeat only type, primary color and location.
+    assert result.evidence_coverage == 80
 
 
 def test_similar_object_is_at_least_five_points_below_same_object() -> None:
@@ -130,7 +134,7 @@ def test_different_secondary_colors_do_not_receive_full_color_points(
 def test_unavailable_secondary_colors_only_evaluate_primary_component(
     secondaries: list[str],
 ) -> None:
-    obj = _request().lost
+    obj = _identical_request().lost
     result = service.evaluate(
         MatchRequest(
             lost=obj.model_copy(update={"secondary_colors": secondaries}),
@@ -146,7 +150,7 @@ def test_unavailable_secondary_colors_only_evaluate_primary_component(
 
 
 def test_secondary_colors_can_be_evaluated_without_primary_colors() -> None:
-    obj = _request().lost.model_copy(update={"primary_color": None})
+    obj = _identical_request().lost.model_copy(update={"primary_color": None})
     result = service.evaluate(MatchRequest(lost=obj, found=obj))
 
     color = _factor(result, MatchFactorName.COLOR)
@@ -218,14 +222,15 @@ def test_description_ignores_report_words_and_location(verb: str) -> None:
         MatchRequest(
             lost=obj.model_copy(
                 update={
-                    "description": "Audífonos negros",
+                    "description": "Audífonos negros con etiqueta cosida",
                     "location": "Cafetería central",
                 }
             ),
             found=obj.model_copy(
                 update={
                     "description": (
-                        f"{verb} unos audífonos negros en la cafetería central"
+                        f"{verb} unos audífonos negros con etiqueta cosida "
+                        "en la cafetería central"
                     ),
                     "location": "Cafetería central",
                 }
@@ -276,14 +281,14 @@ def test_normalization_handles_accents_synonyms_and_requested_word_forms() -> No
         primary_color="negros",
         secondary_colors=["azules"],
         visible_features=["almohadillas acolchadas", "detalles azules en las copas"],
-        description="Audífonos inalámbricos negros",
+        description="Audífonos inalámbricos negros con almohadillas acolchadas",
     )
     right = MatchableObject(
         object_type=" AUDÍFONO Bluetooth ",
         primary_color="negro",
         secondary_colors=["azul"],
         visible_features=["almohadilla acolchado", "detalle azul en la copa"],
-        description="Auricular inalámbrica negra",
+        description="Auricular inalámbrica negra con almohadilla acolchado",
     )
 
     result = service.evaluate(MatchRequest(lost=left, found=right))
@@ -311,10 +316,14 @@ def test_matching_location_and_date_cannot_override_incompatible_types() -> None
 def test_object_type_compatibility_boundary(
     shared_words: int, compatible: bool
 ) -> None:
-    left = MatchableObject(
-        object_type=" ".join(f"pieza{i}" for i in range(shared_words))
+    left = MatchableObject(object_type=" ".join(f"pieza{i}" for i in range(20)))
+    # Inclusion now means full support; exercise 0.35 with equal-sized concepts.
+    right = MatchableObject(
+        object_type=" ".join(
+            [f"pieza{i}" for i in range(shared_words)]
+            + [f"pieza{i}" for i in range(100, 120 - shared_words)]
+        )
     )
-    right = MatchableObject(object_type=" ".join(f"pieza{i}" for i in range(20)))
 
     result = service.evaluate(MatchRequest(lost=left, found=right))
 
@@ -352,7 +361,9 @@ def test_all_unknown_evidence_returns_zero_without_dividing_by_zero() -> None:
 
 
 def test_unavailable_context_does_not_receive_the_identity_weight() -> None:
-    obj = _request().lost.model_copy(update={"location": None, "event_date": None})
+    obj = _identical_request().lost.model_copy(
+        update={"location": None, "event_date": None}
+    )
 
     result = service.evaluate(MatchRequest(lost=obj, found=obj))
 

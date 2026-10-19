@@ -1,5 +1,8 @@
 from app.domain.image_analysis import ObjectImageAnalysis
-from app.infrastructure.gemini_image_analyzer import GeminiImageAnalyzer
+from app.infrastructure.gemini_image_analyzer import (
+    GeminiImageAnalyzer,
+    build_analysis_prompt,
+)
 
 
 class FakeResponse:
@@ -66,3 +69,10 @@ def test_gemini_analyzer_sends_image_and_parses_schema() -> None:
         == ObjectImageAnalysis.model_json_schema()
     )
     assert request["config"].response_json_schema["additionalProperties"] is False
+
+
+def test_prompt_requests_geometry_and_unknown_instead_of_component_names() -> None:
+    prompt = build_analysis_prompt("Descripción no verificada")
+    assert "shape debe describir exclusivamente geometría" in prompt
+    assert "devuelve null" in prompt
+    assert "No repitas object_type, category ni el nombre de una pieza" in prompt

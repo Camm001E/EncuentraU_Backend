@@ -2,10 +2,11 @@ from dataclasses import asdict
 from datetime import date, datetime
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from app.api.schemas.report_images import ReportImageResponse
 from app.domain.matching import MatchFactor, MatchLevel
+from app.domain.matching_version import SCORING_VERSION_MAX_LENGTH
 from app.domain.object_matches import (
     GeneratedMatches,
     MatchPage,
@@ -44,6 +45,7 @@ class ObjectMatchResponse(BaseModel):
     compatible: bool
     level: MatchLevel
     status: MatchStatus
+    scoring_version: str = Field(min_length=1, max_length=SCORING_VERSION_MAX_LENGTH)
     factors: list[MatchFactor]
     warnings: list[str]
     created_at: datetime
@@ -57,6 +59,7 @@ class ObjectMatchResponse(BaseModel):
             id=match.id,
             **match.evaluation.model_dump(),
             status=match.status,
+            scoring_version=match.scoring_version,
             created_at=match.created_at,
             updated_at=match.updated_at,
             my_report=ReportSummaryResponse(**asdict(match.my_report)),
