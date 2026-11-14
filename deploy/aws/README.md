@@ -1,72 +1,65 @@
-# Preparacion de entrega en AWS
+# EncuentraU en AWS
 
-Estado: archivos preparados localmente. No se han creado recursos, subido imagenes ni publicado repositorios. Esta propuesta usa una instancia EC2 Linux x86_64 con Docker Compose, RDS PostgreSQL privado y EBS cifrado separado para fotos. No presupone que esos recursos ya existan. Si hay infraestructura AWS previa, revisar y adaptar antes de ejecutar.
+Despliegue inicial verificado en noviembre de 2026. La plantilla y los scripts pertenecen a la copia de trabajo. No contienen claves, contrasenas, correo de facturacion ni rutas personales. Los artefactos de comprobacion y las credenciales locales quedan en `build/`, excluido de Git. No es necesario publicar los repositorios para desplegar.
 
-## Arquitectura y limites
+## Arquitectura
 
-Internet -> Caddy HTTPS en EC2 -> web Flutter y API FastAPI -> RDS privado. Las fotos privadas las sirve la API despues de autorizar, nunca Caddy. Un proceso API mantiene coherentes los limites y cache de revision visual en memoria. Esta instalacion inicial tiene un unico servidor; no ofrece alta disponibilidad. Escalar requiere almacenamiento compartido y limites/cache distribuidos.
+Internet -> Caddy HTTPS -> Flutter web y FastAPI -> PostgreSQL RDS privado.
 
-El endpoint de analisis de fotos exige una cuenta activa autenticada; el frontend adjunta el token de sesion y procesa la expiracion. Esto no sustituye cuotas y limites de consumo por usuario.
+- EC2 `t3.small`, creditos CPU en modo **standard**, 20 GB gp3 cifrados para el sistema.
+- Otro volumen EBS gp3 cifrado de 20 GB para fotos, montado en `/mnt/encuentrau`. Se conserva al retirar la infraestructura.
+- RDS PostgreSQL `db.t4g.micro`, 20 GB, Single-AZ, cifrado y proteccion contra borrado. Puerto 5432 solo desde el servidor. Conexion TLS `verify-full`, usuario de aplicacion con permisos limitados; migraciones con credenciales separadas.
+- Redis privado dentro de Compose: avisos de cambios del chat, limite de contenedor 128 MB. Los mensajes duraderos estan en PostgreSQL, no en Redis.
+- WebSocket autenticado; la aplicacion vuelve a consultar el historial autorizado por HTTP. La aprobacion administrativa habilita el chat entre participantes.
+- S3 privado para transferir imagenes y respaldar fotos; ninguna foto se publica directamente. Secretos en Secrets Manager y archivo del servidor con modo 600.
+- Administracion mediante Systems Manager. Solo 80/443 TCP publicos; sin SSH, API ni Redis expuestos directamente.
 
-El chat recibe avisos WebSocket mediante Redis privado y reconcilia el historial HTTP cada 30 segundos como respaldo. Redis se ejecuta en la instancia, sin puerto publico; su memoria esta limitada a 128 MB. No se requiere ElastiCache para esta configuracion inicial. La aprobacion administrativa abre la conversacion entre los dos participantes. La IA no concede acceso al chat.
+Es una instalacion economica de un solo servidor, **sin alta disponibilidad**. Escalar requiere almacenamiento compartido y limites/cache distribuidos.
 
-## Lo necesario antes de publicar
+## HTTPS sin comprar dominio
 
-- Cuenta AWS de destino, region, dominio HTTPS y presupuesto. Revisar recursos existentes sin reemplazarlos.
-- EC2 x86_64, Docker y Compose >=2.30; acceso por Systems Manager, IMDSv2 obligatorio, rol de instancia limitado. No incluir claves AWS ni secretos en user-data.
-- Entrada publica solo 80/443 para Caddy y emision HTTPS; ningun puerto publico 8000/5432/22. Salida a RDS y HTTPS para IA/certificados. Configurar DNS del dominio a una IP estable de la instancia.
-- RDS PostgreSQL en subredes privadas, cifrado, proteccion de borrado y backups. Puerto 5432 permitido solo desde el grupo de seguridad EC2. Usuario de aplicacion propio y privilegios ajustados; ejecutar migraciones con rol adecuado.
-- Volumen EBS de datos cifrado montado en /mnt/encuentrau, con DeleteOnTermination=false. Crear uploads con propietario 10001:10001. Montaje persistente y obligatorio antes de arrancar; confirmar con mountpoint. No usar el disco efimero para fotos.
-- Guardar DATABASE_URL, JWT_SECRET_KEY y claves IA en Secrets Manager. Materializar runtime.env en /etc/encuentrau con acceso exclusivo del administrador (chmod 600), sin registrar su contenido. Mantener JWT estable entre reinicios. No copiar el .env de desarrollo completo.
-- Descargar el bundle CA oficial de RDS a /etc/encuentrau/rds-ca.pem y conectar con sslmode=verify-full. Credenciales URL-encoded. Configurar CORS_ORIGINS al origen HTTPS exacto.
-- Backups de RDS y EBS con retencion y una restauracion probada; alertas de disponibilidad, errores, disco y gasto de IA. Definir proteccion contra abuso/rate limits antes de exposicion publica; no se ha implementado un limitador global distribuido.
+El despliegue inicial utiliza un nombre de `sslip.io` que resuelve a la IP elastica. Caddy obtiene y renueva el certificado. Esta opcion depende del servicio DNS gratuito externo. Para un dominio propio: apuntar DNS a la IP, cambiar `SITE_DOMAIN` y `CORS_ORIGINS`, recompilar Flutter con el origen HTTPS y desplegar la imagen nueva.
 
-## Construccion local (no publica)
+No cambiar la IP sin actualizar el nombre y reconstruir Flutter: la URL de la API queda compilada.
 
-Backend, desde su copia:
+## Construccion e instalacion
 
-```sh
-docker build -t encuentrau-api:release-001 .
-```
+1. Revisar cuenta, perfil y region; usar una infraestructura exclusiva de EncuentraU. `infrastructure.json` crea recursos nuevos y conserva los datos persistentes al retirar la pila.
+2. Construir backend con Docker y frontend con `deploy/aws/build.ps1` de su repositorio, pasando el origen HTTPS real. Usar etiquetas de version, nunca incluir `.env`, caches ajenas ni credenciales en las imagenes.
+3. Transferir los archivos `docker save` al bucket privado. En el servidor, descargar los objetos por su clave exacta y ejecutar `docker load`; el rol no necesita listar todo el bucket.
+4. Instalar Docker Compose >=2.30. En la entrega se verifico el SHA256 oficial de Compose 2.39.4 antes de instalarlo.
+5. Colocar `compose.yaml`, `encuentrau.service`, `init_database.py` y `bootstrap_host.py` en `/opt/encuentrau`. Crear `manifest.json` con las salidas `DataVolume`, `DbEndpoint`, `DbSecret`, `Bucket` de CloudFormation y el campo `Domain`.
+6. Preparar el secreto `encuentrau/runtime`: `OPENAI_API_KEY`, `GEMINI_API_KEY`, `JWT_SECRET_KEY`, `DB_APP_PASSWORD`, `INITIAL_ADMIN_PASSWORD`. No usar valores en argumentos, logs o archivos versionados. El secreto maestro de RDS lo administra AWS.
+7. Ejecutar `python3 bootstrap_host.py` desde `/opt/encuentrau`, mediante SSM. Es un instalador inicial: verifica el disco, crea filesystem solo si esta vacio, monta fotos, aplica migraciones, crea administrador, cambia a usuario limitado y arranca Compose. Revisar antes de reutilizarlo en una actualizacion.
 
-Frontend, desde su copia, reemplazando el dominio:
+El administrador inicial es Camila (`camila@example.com`), con contrasena aleatoria entregada por archivo privado. Ese correo es un identificador inicial, no un buzon configurado para recuperacion. No existe una contrasena predeterminada en el repositorio.
 
-```powershell
-./deploy/aws/build.ps1 -PublicOrigin https://app.su-dominio.com -ImageTag encuentrau-web:release-001
-```
+Nunca ejecutar `docker compose config` sin `--quiet` en logs compartidos: puede expandir secretos. Nunca usar `down -v` para actualizar.
 
-La URL queda compilada en Flutter; el build de prueba existente usa localhost y NO es un paquete final para el dominio. El script obliga a recompilar. No copiar .dart_tool, build ni entornos virtuales de los originales.
+## Respaldos y costos
 
-Las imagenes se pueden transferir mas adelante mediante ECR privado o docker save/load. No ejecutar push ni copiar secretos a las imagenes. Registrar digests de las imagenes aprobadas; evitar latest. .dockerignore usa una lista de archivos permitidos.
+- RDS: retencion automatica de **1 dia**, limite que acepto el plan gratuito de esta cuenta. Recuperacion a un punto en el tiempo disponible; una restauracion completa de RDS aun no se ha ensayado.
+- Fotos: temporizador diario a las 06:00 UTC, S3 cifrado y versionado. Se conserva el respaldo actual y las versiones anteriores expiran despues de 7 dias. Se verifico descarga y lectura de las fotos de prueba del archivo respaldado.
+- Artefactos de instalacion: vencimiento de 14 dias; versiones antiguas, 7 dias. Mantener las imagenes originales en almacenamiento local privado si se necesita reconstruir mas tarde.
+- Presupuesto mensual de EncuentraU: USD 55, calculado sin descontar creditos; avisos reales a USD 20, 35, 45 y 55, mas aviso de prevision al 100%. El destinatario se configura fuera del repositorio. **Son avisos, no un corte automatico del gasto.**
+- Estimacion inicial: USD 40-55/mes para esta configuracion con uso ligero. Trafico, fotos y uso pueden aumentarla. OpenAI y Gemini tienen facturacion separada de AWS.
 
-## Activacion posterior, solo cuando se autorice
+No hay apagado automatico el 7 de diciembre. La continuidad depende de credito disponible, servicio AWS y uso; revisar consumo real porque la facturacion tiene retraso.
 
-En EC2, con los dos tags ya cargados, Compose y archivos de configuracion preparados:
+## Aceptacion realizada
 
-```sh
-mountpoint /mnt/encuentrau
-# Desde el directorio que contiene compose.yaml y deployment.env:
-docker compose --env-file deployment.env config --quiet
-# Backup previo a cada migracion. Una sola ejecucion, sin trafico:
-docker compose --env-file deployment.env run --rm --no-deps api alembic upgrade head
-docker compose --env-file deployment.env up -d
-```
+Sobre HTTPS publico: salud de PostgreSQL, registro/login, fotos privadas, coincidencia, reclamacion/aprobacion, mensajes en ambos sentidos con dos WebSockets y Redis, denegacion a terceros y administrador ajeno, lectura de mensajes, doble confirmacion y cierre de entrega. Tras reiniciar la API persistieron acceso, mensajes y fotos. Chrome verifico ingreso y restauracion de sesion; se revisaron las vistas de escritorio y movil.
 
-No usar `docker compose config` sin --quiet en un registro compartido: puede expandir secretos. El servicio API no publica puertos. Su healthcheck exige PostgreSQL disponible; la web espera al servicio saludable. Se incluye encuentrau.service para instalar en /etc/systemd/system, con Compose y deployment.env en /opt/encuentrau. La unidad comprueba el montaje EBS antes de arrancar. Configurar /etc/fstab y verificar la ruta de docker en la distribucion elegida. Habilitarla solo despues de migrar y validar la configuracion.
+Las tres cuentas de aceptacion quedaron desactivadas. El caso tecnico cerrado se conserva identificado como prueba para respetar la auditoria inmutable de entregas.
 
-Crear administrador mediante `python -m app.cli.create_admin` en el contenedor con entrada interactiva, nunca contrasenas en argumentos ni un usuario administrador publico de prueba.
+OpenAI y Gemini respondieron desde AWS por separado y sin fallback en una foto real. Esta es una prueba de integracion, no una nueva medicion de precision. La IA puede diferir en nombres de objetos y no demuestra propiedad.
 
-## Aceptacion y rollback
+## Operacion y limites pendientes
 
-Validar HTTPS y certificado, /health/database, registro/login de dos cuentas de prueba, reportes con fotos, coincidencia, reclamacion, aprobacion administrativa, chat bidireccional y entrega. Intentar acceso con tercero y administrador ajeno; comprobar 404. Reiniciar API y confirmar mensajes y fotos conservados. Comprobar desde dos navegadores/dispositivos y cerrar las cuentas de prueba al finalizar.
+Revisar avisos de presupuesto, cuota y facturacion de proveedores IA. El analisis exige autenticacion, pero aun no hay cuota global diaria ni limitador distribuido contra abuso: evitar una apertura masiva hasta incorporar esos controles. No se ha configurado envio de correo ni recuperacion por correo del usuario inicial.
 
-Para rollback, conservar tags anteriores y backups. Revertir imagenes solo si el esquema sigue siendo compatible. No ejecutar downgrades destructivos automaticos; restaurar RDS y EBS de forma coordinada y probar antes de cambiar trafico. Nunca usar docker compose down -v para una actualizacion.
+Antes de una entrega con SLA: ensayar restauracion completa de RDS y fotos, probar carga con el volumen esperado y acordar monitorizacion/soporte. La disponibilidad de un unico servidor no equivale a un servicio tolerante a fallos.
 
-## Fuentes verificadas
+Para rollback, conservar imagenes previas compatibles con el esquema. No hacer downgrades destructivos automaticos; restaurar base y fotos coordinadamente si fuera necesario.
 
-- Persistencia EBS: https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/preserving-volumes-on-termination.html
-- TLS de RDS: https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/PostgreSQL.Concepts.General.SSL.html
-
-## Pendiente para declarar entrega
-
-Infraestructura y dominio reales, carga protegida de secretos, migracion y administrador de produccion, proteccion contra abuso, alertas/backups/restauracion y aceptacion de extremo a extremo en HTTPS. La validacion local de chat no sustituye esa aceptacion. La IA conserva los limites documentados en el cierre de IA.
+Referencias: [TLS de RDS](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/PostgreSQL.Concepts.General.SSL.html), [persistencia EBS](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/preserving-volumes-on-termination.html), [Compose 2.39.4](https://github.com/docker/compose/releases/tag/v2.39.4).
