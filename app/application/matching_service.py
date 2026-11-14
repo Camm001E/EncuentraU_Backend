@@ -14,6 +14,7 @@ from app.domain.matching import (
     MatchLevel,
     MatchRequest,
 )
+from app.domain.product_context import compare_product_context
 from app.domain.semantic_normalization import (
     colour,
     description_features,
@@ -61,6 +62,14 @@ class MatchingService:
     def evaluate(self, request: MatchRequest) -> MatchEvaluation:
         lost, found = request.lost, request.found
         type_similarity = object_type_similarity(lost.object_type, found.object_type)
+        product_context = compare_product_context(lost, found)
+        lexical_mismatch = (
+            type_similarity is not None
+            and type_similarity < self._type_compatibility_threshold
+        )
+        contextual_candidate = (
+            lexical_mismatch and product_context.bridge and not product_context.conflict
+        )
         excluded = (
             tokens(lost.location)
             | tokens(found.location)
@@ -117,6 +126,9 @@ class MatchingService:
             type_similarity is None
             or type_similarity >= self._type_compatibility_threshold
         )
+        compatible = (
+            compatible or contextual_candidate
+        ) and not product_context.conflict
         percentage = round(
             identity * self._identity_share + context * self._context_share
         )
@@ -136,6 +148,8 @@ class MatchingService:
         limited_identity = percentage >= self._high_threshold and not strong_evidence
         if limited_identity:
             percentage = self._high_threshold - 1
+        if contextual_candidate:
+            percentage = min(percentage, self._high_threshold - 1)
         if not compatible:
             percentage = min(percentage, self._incompatible_ceiling)
         if compatible and percentage >= self._high_threshold:
@@ -176,7 +190,15 @@ class MatchingService:
                 "Coincidencia limitada a posible: falta evidencia descriptiva "
                 "consistente para una coincidencia alta. Requiere revisión humana."
             )
-        if not compatible:
+        if contextual_candidate:
+            warnings.append(
+                "Posible coincidencia por producto y envase descritos "
+                "de forma distinta. Los nombres no se consideran equivalentes; "
+                "revisa las fotos y los detalles."
+            )
+        if product_context.conflict:
+            warnings.append("Los productos o sus usos explícitos son diferentes.")
+        elif not compatible:
             warnings.append("Tipos de objeto incompatibles: similitud inferior al 35%.")
         lost_secondary = self._colors(lost.secondary_colors)
         found_secondary = self._colors(found.secondary_colors)

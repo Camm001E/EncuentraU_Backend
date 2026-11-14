@@ -93,10 +93,52 @@ class User(UUIDPrimaryKey, Timestamps, Base):
     is_active: Mapped[bool] = mapped_column(
         Boolean, default=True, server_default=true()
     )
+    email_verified: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default=text("false")
+    )
+    session_version: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    recovery_digest: Mapped[str | None] = mapped_column(String(64))
+    recovery_expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True)
+    )
+    recovery_sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    recovery_window_start: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True)
+    )
+    recovery_attempts: Mapped[int] = mapped_column(
+        Integer, default=0, server_default="0"
+    )
+    recovery_send_count: Mapped[int] = mapped_column(
+        Integer, default=0, server_default="0"
+    )
+    verification_digest: Mapped[str | None] = mapped_column(String(64))
+    verification_expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True)
+    )
+    verification_sent_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True)
+    )
+    verification_window_start: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True)
+    )
+    verification_attempts: Mapped[int] = mapped_column(
+        Integer, default=0, server_default="0"
+    )
+    verification_send_count: Mapped[int] = mapped_column(
+        Integer, default=0, server_default="0"
+    )
 
     reports: Mapped[list[ObjectReport]] = relationship(
         back_populates="user", passive_deletes="all"
     )
+
+
+class EmailDeliveryBudget(Base):
+    __tablename__ = "email_delivery_budget"
+    id: Mapped[str] = mapped_column(String(20), primary_key=True)
+    day: Mapped[date] = mapped_column(Date, nullable=False)
+    sent: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    last_sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class ObjectReport(UUIDPrimaryKey, Timestamps, Base):
@@ -104,12 +146,18 @@ class ObjectReport(UUIDPrimaryKey, Timestamps, Base):
     __table_args__ = (
         CheckConstraint("report_type IN ('lost', 'found')", name="report_type"),
         CheckConstraint("status IN ('active', 'resolved', 'cancelled')", name="status"),
+        CheckConstraint(
+            "NOT hidden_from_lists OR status <> 'active'", name="hidden_closed_only"
+        ).ddl_if(dialect="postgresql"),
     )
 
     user_id: Mapped[UUID] = mapped_column(
         ForeignKey("users.id", ondelete="RESTRICT"), index=True
     )
     report_type: Mapped[str] = mapped_column(String(10))
+    hidden_from_lists: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default=text("false")
+    )
     status: Mapped[str] = mapped_column(
         String(20), default="active", server_default="active"
     )
@@ -237,6 +285,10 @@ class ObjectMatch(UUIDPrimaryKey, Timestamps, Base):
     )
     status: Mapped[str] = mapped_column(
         String(20), default="pending", server_default="pending"
+    )
+
+    visual_review: Mapped[dict[str, Any] | None] = mapped_column(
+        JSON_DATA, nullable=True
     )
 
     lost_report: Mapped[ObjectReport] = relationship(

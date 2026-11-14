@@ -37,12 +37,12 @@ with engine.begin() as connection:
             "SELECT ON SEQUENCES TO euapp"
         )
 with Session(engine) as session:
-    if not session.query(User).filter_by(email="camila@example.com").first():
+    if not session.query(User).filter_by(student_code="ADMIN-CAMILA").first():
         session.add(
             User(
                 id=uuid4(),
                 full_name="Camila",
-                email="camila@example.com",
+                email=os.environ.get("ADMIN_EMAIL", "camila@example.com"),
                 student_code="ADMIN-CAMILA",
                 password_hash=get_password_hasher().hash(
                     os.environ["INITIAL_ADMIN_PASSWORD"]

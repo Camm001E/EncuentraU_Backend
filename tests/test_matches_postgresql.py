@@ -693,12 +693,57 @@ def test_matches_are_sorted_by_creation_date_when_scores_are_equal(reports):
 
 
 def test_persisted_photo_quality_warning_reaches_generated_match(reports):
-    analysis = {"extracted_data": {
-        "requires_another_photo": True, "image_quality": "mala",
-        "visible_features": ["parche triangular rojo"],
-    }, "confidence": "baja"}
+    analysis = {
+        "extracted_data": {
+            "requires_another_photo": True,
+            "image_quality": "mala",
+            "visible_features": ["parche triangular rojo"],
+        },
+        "confidence": "baja",
+    }
     lost = create_report(reports, "lost", with_analysis=False, analysis=analysis)
     create_report(reports, "found", mine=False, with_analysis=False, analysis=analysis)
     match = generated(reports, lost["id"])["items"][0]
     assert match["level"] == "possible"
     assert any("otra fotografia" in w for w in match["warnings"])
+
+
+def test_report_filter_is_owned_and_totals_precede_pagination(reports):
+    lost, found = pair(reports)
+    another_lost = create_report(reports, "lost")
+    another_found = create_report(reports, "found", mine=False)
+    generated(reports, lost["id"])
+    generated(reports, another_lost["id"])
+    response = reports.client.get(
+        f"{MATCHES}/me",
+        headers=reports.headers,
+        params={"report_id": lost["id"], "limit": 1, "offset": 1},
+    )
+    assert response.status_code == 200, response.text
+    page = response.json()
+    assert page["total"] == 2 and len(page["items"]) == 1
+    assert page["items"][0]["my_report"]["id"] == lost["id"]
+    for report_id in (found["id"], str(uuid4())):
+        page = reports.client.get(
+            f"{MATCHES}/me", headers=reports.headers, params={"report_id": report_id}
+        ).json()
+        assert page["total"] == 0 and page["items"] == []
+    page = reports.client.get(
+        f"{MATCHES}/me",
+        headers=reports.other_headers,
+        params={"report_id": another_found["id"]},
+    ).json()
+    assert page["total"] == 2
+    assert all(item["my_report"]["id"] == another_found["id"] for item in page["items"])
+    page = reports.client.get(
+        f"{MATCHES}/me",
+        headers=reports.headers,
+        params={"report_id": lost["id"], "status": "rejected"},
+    ).json()
+    assert page["total"] == 0
+    assert (
+        reports.client.get(
+            f"{MATCHES}/me", headers=reports.headers, params={"report_id": "invalid"}
+        ).status_code
+        == 422
+    )

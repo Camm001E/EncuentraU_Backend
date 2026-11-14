@@ -28,13 +28,28 @@ def object_type_similarity(left: str | None, right: str | None) -> float | None:
         "cosmetiquera": "neceser",
         "paraguas": "sombrilla",
         "archivador": "carpeta",
+        "archivadores": "carpeta",
         "smartphone": "telefono",
+        "smartphones": "telefono",
         "celular": "telefono",
         "movil": "telefono",
         "funda": "estuche",
     }
+    # Lookups use normalized tokens, including invariant nouns such as
+    # "paraguas" that the general plural rule reduces to "paragua".
+    aliases = {
+        token: canonical
+        for spelling, canonical in aliases.items()
+        for token in tokens(spelling)
+    }
     a = frozenset(aliases.get(w, w) for w in a)
     b = frozenset(aliases.get(w, w) for w in b)
+    # A small zip pouch may be described by its construction instead of its
+    # use. Preserve explicit contents/use, and do not generalize bags or totes.
+    if {"bolsita", "cierre"} <= a:
+        a = (a - {"bolsita", "cierre"}) | {"estuche"}
+    if {"bolsita", "cierre"} <= b:
+        b = (b - {"bolsita", "cierre"}) | {"estuche"}
     # A generic case can be a pencil case; explicit different uses must not
     # become equivalent (e.g. earphone case versus pencil case).
     if (a == {"estuche"} and bool({"cartuchera", "neceser"} & b)) or (
@@ -81,8 +96,12 @@ def feature_pair(left: Feature, right: Feature) -> Comparison:
         contradictions.append(
             "Cantidades explícitas incompatibles en un rasgo comparable."
         )
-    left_geometry = left.attributes & set(GEOMETRY.values())
-    right_geometry = right.attributes & set(GEOMETRY.values())
+    # Proportion (alargado), surface (plano/curvo) and volume (cilindrico)
+    # can coexist with a contour. Their lexical difference is not a conflict.
+    # Keep similarity unchanged: absence of a contradiction is not agreement.
+    contours = {"circular", "ovalado", "rectangular", "triangular"}
+    left_geometry = left.attributes & contours
+    right_geometry = right.attributes & contours
     if left_geometry and right_geometry and not left_geometry & right_geometry:
         contradictions.append("Geometrías explícitas diferentes en un mismo rasgo.")
     if left.absent != right.absent:

@@ -339,7 +339,7 @@
           },
           "MetadataOptions": {
             "HttpTokens": "required",
-            "HttpPutResponseHopLimit": 1
+            "HttpPutResponseHopLimit": 2
           },
           "CreditSpecification": {
             "CpuCredits": "standard"

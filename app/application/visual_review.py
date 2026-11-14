@@ -58,6 +58,16 @@ class ReviewMatchPhotos:
             b.reference.sha256,
             self.analyzer.namespace,
         )
+        stored = getattr(match, "visual_review", None)
+        if (
+            isinstance(stored, dict)
+            and getattr(match, "visual_review_namespace", None)
+            == self.analyzer.namespace
+            and (stored.get("source_sha256"), stored.get("candidate_sha256"))
+            == (a.reference.sha256, b.reference.sha256)
+        ):
+            self._validate_current(match_id, match, user, a, b)
+            return {**stored, "cached": True}
         cached = self.cache.get(key)
         response = cached
         if response is None:
@@ -93,6 +103,15 @@ class ReviewMatchPhotos:
                         "candidate_sha256": b.reference.sha256,
                     }
                     self._validate_current(match_id, match, user, a, b)
+                    if (
+                        self.repository.save_visual_review(
+                            match_id, user.id, self.analyzer.namespace, response
+                        )
+                        is False
+                    ):
+                        raise HTTPException(
+                            409, "Las fotos cambiaron. Actualiza la coincidencia."
+                        )
                     self.cache.put(key, response)
             except ImageAnalysisProviderError:
                 raise HTTPException(

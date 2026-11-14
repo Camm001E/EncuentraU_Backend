@@ -32,7 +32,7 @@ class FallbackImageAnalyzer:
             fallback_used=fallback_used,
             fallback_reason=reason,
             duration_ms=round((monotonic() - started) * 1000),
-            analysis_version="visual-v1",
+            analysis_version="visual-v3",
         )
         logger.info(
             "AI analysis provider=%s model=%s fallback=%s duration_ms=%s",

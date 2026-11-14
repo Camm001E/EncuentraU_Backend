@@ -23,7 +23,9 @@ router = APIRouter()
 def authorize(token, conversation_id, settings):
     with database_session.get_session_factory()() as session:
         user = GetCurrentUser(
-            SQLAlchemyUserRepository(session), JWTAccessTokenService(settings)
+            SQLAlchemyUserRepository(session),
+            JWTAccessTokenService(settings),
+            settings.email_verification_required,
         )(token)
         GetConversation(SQLAlchemyConversationRepository(session))(
             conversation_id, user

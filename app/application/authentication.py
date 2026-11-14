@@ -3,6 +3,7 @@ from uuid import uuid4
 from app.domain.authentication import (
     AuthenticatedUser,
     DuplicateUserError,
+    EmailVerificationRequiredError,
     InactiveUserError,
     InvalidAccessTokenError,
     InvalidCredentialsError,
@@ -48,10 +49,12 @@ class LoginUser:
         repository: UserRepository,
         passwords: PasswordHasher,
         tokens: AccessTokenService,
+        require_verified: bool = False,
     ):
         self.repository = repository
         self.passwords = passwords
         self.tokens = tokens
+        self.require_verified = require_verified
 
     def __call__(self, *, email: str, password: str) -> AuthenticatedUser:
         user = self.repository.get_by_email(normalize_email(email))
@@ -60,13 +63,21 @@ class LoginUser:
             raise InvalidCredentialsError
         if not user.is_active:
             raise InactiveUserError
+        if self.require_verified and not user.email_verified:
+            raise EmailVerificationRequiredError
         return AuthenticatedUser(user=user, token=self.tokens.issue(user))
 
 
 class GetCurrentUser:
-    def __init__(self, repository: UserRepository, tokens: AccessTokenService):
+    def __init__(
+        self,
+        repository: UserRepository,
+        tokens: AccessTokenService,
+        require_verified: bool = False,
+    ):
         self.repository = repository
         self.tokens = tokens
+        self.require_verified = require_verified
 
     def __call__(self, token: str) -> User:
         user = self.repository.get_by_id(self.tokens.decode(token))
@@ -74,5 +85,8 @@ class GetCurrentUser:
             raise InvalidAccessTokenError
         if not user.is_active:
             raise InactiveUserError
+        self.tokens.decode(token, expected_version=user.session_version)
         # Current role and active state always come from the database.
+        if self.require_verified and not user.email_verified:
+            raise EmailVerificationRequiredError
         return user

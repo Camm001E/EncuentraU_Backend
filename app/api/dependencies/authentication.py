@@ -54,5 +54,8 @@ def get_current_user(
     token: Annotated[str, Depends(get_bearer_token)],
     tokens: Annotated[AccessTokenService, Depends(get_token_service)],
     repository: Annotated[UserRepository, Depends(get_user_repository)],
+    settings: Annotated[Settings, Depends(get_settings)],
 ) -> User:
-    return GetCurrentUser(repository, tokens)(token)
+    return GetCurrentUser(repository, tokens, settings.email_verification_required)(
+        token
+    )

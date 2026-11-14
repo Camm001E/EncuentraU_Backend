@@ -64,7 +64,7 @@ db = json.loads(
     ]
 )
 base = {
-    "AI_QUOTA_ENABLED": "true",
+    "AI_QUOTA_ENABLED": "false",
     "AI_QUOTA_USER_HOUR": "6",
     "AI_QUOTA_USER_DAY": "20",
     "AI_QUOTA_GLOBAL_DAY": "120",
@@ -75,6 +75,11 @@ base = {
     "GEMINI_MODEL": "gemini-3.5-flash-lite",
     "AI_TIMEOUT_SECONDS": "60",
     "CORS_ORIGINS": "https://" + m["Domain"],
+    "EMAIL_VERIFICATION_REQUIRED": secret.get("EMAIL_VERIFICATION_REQUIRED", "false"),
+    "EMAIL_SENDER": secret.get("EMAIL_SENDER", ""),
+    "ADMIN_EMAIL": secret.get("ADMIN_EMAIL", "camila@example.com"),
+    "EMAIL_AWS_REGION": "us-east-2",
+    "EMAIL_DAILY_LIMIT": "40",
 }
 for key in ("OPENAI_API_KEY", "GEMINI_API_KEY", "JWT_SECRET_KEY"):
     base[key] = secret[key]
@@ -111,8 +116,8 @@ writeenv(
     }
 )
 Path("deployment.env").write_text(
-    "BACKEND_IMAGE=encuentrau-api:release-20261113\n"
-    "WEB_IMAGE=encuentrau-web:release-20261113\nSITE_DOMAIN="
+    "BACKEND_IMAGE=encuentrau-api:email-20261115-final\n"
+    "WEB_IMAGE=encuentrau-web:email-20261115-final\nSITE_DOMAIN="
     + m["Domain"]
     + "\nRUNTIME_ENV_FILE=/etc/encuentrau/runtime.env\n"
     "UPLOADS_PATH=/mnt/encuentrau/uploads\n"

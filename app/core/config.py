@@ -10,6 +10,10 @@ BACKEND_DIR = Path(__file__).resolve().parents[2]
 
 
 class Settings(BaseSettings):
+    email_verification_required: bool = False
+    email_sender: SecretStr | None = Field(default=None, repr=False)
+    email_aws_region: str = "us-east-2"
+    email_daily_limit: int = Field(default=40, ge=1, le=200)
     ai_quota_enabled: bool = False
     ai_quota_user_hour: int = Field(default=6, ge=3, le=1000)
     ai_quota_user_day: int = Field(default=20, ge=3, le=10000)

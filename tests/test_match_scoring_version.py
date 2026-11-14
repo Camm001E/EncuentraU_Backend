@@ -102,10 +102,19 @@ def test_version_migration_backfills_without_changing_historical_rows(reports):
     config = migration_config()
     config.attributes["connection"] = connection
     command.downgrade(config, "0005_delivery_closure")
+    legacy_users = Table("users", MetaData(), autoload_with=connection)
     with Session(connection, expire_on_commit=False) as session:
-        user = make_user()
-        session.add(user)
-        session.flush()
+        # Seed the historical schema without columns from later migrations.
+        user = make_user(id=uuid4())
+        session.execute(
+            legacy_users.insert().values(
+                id=user.id,
+                full_name=user.full_name,
+                email=user.email,
+                student_code=user.student_code,
+                password_hash=user.password_hash,
+            )
+        )
         lost = make_report(user.id)
         found = [make_report(user.id, "found") for _ in range(3)]
         session.add_all([lost, *found])
@@ -140,8 +149,13 @@ def test_version_migration_backfills_without_changing_historical_rows(reports):
     )
     assert len(after) == len(before) == 3
     assert all(row["scoring_version"] == LEGACY_SCORING_VERSION for row in after)
+    assert all(row["visual_review"] is None for row in after)
     assert [
-        {key: value for key, value in row.items() if key != "scoring_version"}
+        {
+            key: value
+            for key, value in row.items()
+            if key not in {"scoring_version", "visual_review"}
+        }
         for row in after
     ] == before
     assert not next(

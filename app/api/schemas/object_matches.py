@@ -5,6 +5,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.api.schemas.report_images import ReportImageResponse
+from app.api.schemas.visual_review import VisualReviewResponse
 from app.domain.matching import MatchFactor, MatchLevel
 from app.domain.matching_version import SCORING_VERSION_MAX_LENGTH
 from app.domain.object_matches import (
@@ -52,6 +53,7 @@ class ObjectMatchResponse(BaseModel):
     updated_at: datetime
     my_report: ReportSummaryResponse
     candidate_report: ReportSummaryResponse
+    visual_review: VisualReviewResponse | None = None
 
     @classmethod
     def from_match(cls, match: ObjectMatch) -> "ObjectMatchResponse":
@@ -60,6 +62,7 @@ class ObjectMatchResponse(BaseModel):
             **match.evaluation.model_dump(),
             status=match.status,
             scoring_version=match.scoring_version,
+            visual_review=match.visual_review,
             created_at=match.created_at,
             updated_at=match.updated_at,
             my_report=ReportSummaryResponse(**asdict(match.my_report)),

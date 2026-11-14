@@ -126,11 +126,17 @@ class ListMyMatches:
         offset: int = 0,
         level: MatchLevel | None = None,
         status: MatchStatus | None = None,
+        report_id: UUID | None = None,
     ) -> MatchPage:
         if not 1 <= limit <= MAX_MATCH_LIMIT or offset < 0:
             raise MatchValidationError
         return self.repository.list_by_user(
-            user_id, limit=limit, offset=offset, level=level, status=status
+            user_id,
+            limit=limit,
+            offset=offset,
+            level=level,
+            status=status,
+            **({"report_id": report_id} if report_id is not None else {}),
         )
 
 

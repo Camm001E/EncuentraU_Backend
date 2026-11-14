@@ -32,13 +32,13 @@ No cambiar la IP sin actualizar el nombre y reconstruir Flutter: la URL de la AP
 6. Preparar el secreto `encuentrau/runtime`: `OPENAI_API_KEY`, `GEMINI_API_KEY`, `JWT_SECRET_KEY`, `DB_APP_PASSWORD`, `INITIAL_ADMIN_PASSWORD`. No usar valores en argumentos, logs o archivos versionados. El secreto maestro de RDS lo administra AWS.
 7. Ejecutar `python3 bootstrap_host.py` desde `/opt/encuentrau`, mediante SSM. Es un instalador inicial: verifica el disco, crea filesystem solo si esta vacio, monta fotos, aplica migraciones, crea administrador, cambia a usuario limitado y arranca Compose. Revisar antes de reutilizarlo en una actualizacion.
 
-El administrador inicial es Camila (`camila@example.com`), con contrasena aleatoria entregada por archivo privado. Ese correo es un identificador inicial, no un buzon configurado para recuperacion. No existe una contrasena predeterminada en el repositorio.
+El administrador inicial es Camila, con correo configurado mediante `ADMIN_EMAIL` y contrasena aleatoria entregada por archivo privado. El correo real se mantiene fuera del repositorio. El instalador usa el codigo `ADMIN-CAMILA` para evitar duplicar la cuenta si cambia su direccion. No existe una contrasena predeterminada en el repositorio.
 
 Nunca ejecutar `docker compose config` sin `--quiet` en logs compartidos: puede expandir secretos. Nunca usar `down -v` para actualizar.
 
 ## Respaldos y costos
 
-- RDS: retencion automatica de **1 dia**, limite que acepto el plan gratuito de esta cuenta. Recuperacion a un punto en el tiempo disponible; una restauracion completa de RDS aun no se ha ensayado.
+- RDS: retencion automatica de **1 dia**, limite que acepto el plan gratuito de esta cuenta. Recuperacion a un punto en el tiempo disponible; restauracion aislada de RDS y fotos ensayada, incluidos login, historial y reinicio. Ver `RESTORE_RUNBOOK.md`.
 - Fotos: temporizador diario a las 06:00 UTC, S3 cifrado y versionado. Se conserva el respaldo actual y las versiones anteriores expiran despues de 7 dias. Se verifico descarga y lectura de las fotos de prueba del archivo respaldado.
 - Artefactos de instalacion: vencimiento de 14 dias; versiones antiguas, 7 dias. Mantener las imagenes originales en almacenamiento local privado si se necesita reconstruir mas tarde.
 - Presupuesto mensual de EncuentraU: USD 55, calculado sin descontar creditos; avisos reales a USD 20, 35, 45 y 55, mas aviso de prevision al 100%. El destinatario se configura fuera del repositorio. **Son avisos, no un corte automatico del gasto.**
@@ -56,9 +56,9 @@ OpenAI y Gemini respondieron desde AWS por separado y sin fallback en una foto r
 
 ## Operacion y limites pendientes
 
-Revisar avisos de presupuesto, cuota y facturacion de proveedores IA. El analisis exige autenticacion, pero aun no hay cuota global diaria ni limitador distribuido contra abuso: evitar una apertura masiva hasta incorporar esos controles. No se ha configurado envio de correo ni recuperacion por correo del usuario inicial.
+Revisar avisos de presupuesto, cuota y facturacion de proveedores IA. El analisis exige autenticacion y cupos persistentes por cuenta/hora/dia y globales por dia/mes. Las comparaciones cacheadas no descuentan de nuevo. Ver `AI_QUOTAS.md`. Estos cupos no sustituyen proteccion general contra ataques ni un limite monetario del proveedor. La verificacion de correo usa Amazon SES con limites persistentes; ver `EMAIL_VERIFICATION.md`. La recuperacion de contrasenas usa el mismo presupuesto de SES; ver `PASSWORD_RECOVERY.md`.
 
-Antes de una entrega con SLA: ensayar restauracion completa de RDS y fotos, probar carga con el volumen esperado y acordar monitorizacion/soporte. La disponibilidad de un unico servidor no equivale a un servicio tolerante a fallos.
+Antes de una entrega con SLA: probar carga con el volumen esperado y acordar monitorizacion/soporte. La restauracion completa ya se ensayo en un entorno privado y temporal, retirado despues de verificarlo. La disponibilidad de un unico servidor no equivale a un servicio tolerante a fallos.
 
 Para rollback, conservar imagenes previas compatibles con el esquema. No hacer downgrades destructivos automaticos; restaurar base y fotos coordinadamente si fuera necesario.
 

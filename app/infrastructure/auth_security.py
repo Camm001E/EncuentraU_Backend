@@ -51,6 +51,7 @@ class JWTAccessTokenService:
         value = jwt.encode(
             {
                 "sub": str(user.id),
+                "ver": user.session_version,
                 "role": user.role.value,
                 "iat": now,
                 "exp": now + self._lifetime,
@@ -60,7 +61,7 @@ class JWTAccessTokenService:
         )
         return AccessToken(value=value, expires_in=int(self._lifetime.total_seconds()))
 
-    def decode(self, token: str) -> UUID:
+    def decode(self, token: str, expected_version: int | None = None) -> UUID:
         try:
             payload = jwt.decode(
                 token,
@@ -68,6 +69,11 @@ class JWTAccessTokenService:
                 algorithms=[self._algorithm],
                 options={"require": ["sub", "role", "iat", "exp"]},
             )
+            version = payload.get("ver", 0)
+            if type(version) is not int or version < 0:
+                raise InvalidAccessTokenError
+            if expected_version is not None and version != expected_version:
+                raise InvalidAccessTokenError
             UserRole(payload["role"])
             if payload["exp"] <= payload["iat"]:
                 raise InvalidAccessTokenError

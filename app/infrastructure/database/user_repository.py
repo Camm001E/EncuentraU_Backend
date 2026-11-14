@@ -26,6 +26,8 @@ class SQLAlchemyUserRepository:
             password_hash=model.password_hash,
             role=UserRole(model.role),
             is_active=model.is_active,
+            email_verified=model.email_verified,
+            session_version=model.session_version,
         )
 
     def _find(self, statement: Select) -> User | None:
@@ -55,6 +57,7 @@ class SQLAlchemyUserRepository:
             password_hash=user.password_hash,
             role=user.role.value,
             is_active=user.is_active,
+            email_verified=user.email_verified,
         )
         try:
             self.session.add(model)

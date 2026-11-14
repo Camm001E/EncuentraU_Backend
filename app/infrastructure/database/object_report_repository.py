@@ -123,7 +123,10 @@ class SQLAlchemyObjectReportRepository:
         report_type: ReportType | None = None,
         status: ReportStatus | None = None,
     ) -> ReportPage:
-        predicates = [ReportModel.user_id == user_id]
+        predicates = [
+            ReportModel.user_id == user_id,
+            ReportModel.hidden_from_lists.is_(False),
+        ]
         if report_type is not None:
             predicates.append(ReportModel.report_type == report_type.value)
         if status is not None:

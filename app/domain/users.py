@@ -29,3 +29,5 @@ class User:
     password_hash: str = field(repr=False)
     role: UserRole = UserRole.STUDENT
     is_active: bool = True
+    email_verified: bool = False
+    session_version: int = 0

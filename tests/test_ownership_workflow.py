@@ -349,11 +349,16 @@ def send(workflow, conversation, body="Mensaje de prueba", actor="A", client_id=
 
 def test_messages_idempotency_order_pagination_read_and_privacy(workflow):
     _, conversation = workflow.approved()
-    ids = []
+    sent_order = []
     for i in range(5):
         response = send(workflow, conversation, body=f"Mensaje de prueba {i}")
         assert response.status_code == 201
-        ids.append(response.json()["id"])
+        sent_order.append(
+            (
+                datetime.fromisoformat(response.json()["created_at"]),
+                response.json()["id"],
+            )
+        )
     client_id = uuid4()
     first = send(
         workflow,
@@ -393,7 +398,14 @@ def test_messages_idempotency_order_pagination_read_and_privacy(workflow):
         cursor = page["next_cursor"]
         if not cursor:
             break
-    assert received == ids + [first.json()["id"]]
+    sent_order.append(
+        (
+            datetime.fromisoformat(first.json()["created_at"]),
+            first.json()["id"],
+        )
+    )
+    # Millisecond clock ties are ordered by id, as specified by the cursor.
+    assert received == [message_id for _, message_id in sorted(sent_order)]
     assert (
         workflow.client.post(
             path + "/read",

@@ -176,10 +176,11 @@ class SQLAlchemyObjectMatchRepository:
                         "updated_at": func.clock_timestamp(),
                         "scoring_version": statement.excluded.scoring_version,
                     },
+                    # match_id is non-null. This membership check stays scoped
+                    # to the upsert target instead of joining all matches in
+                    # a nested, uncorrelated EXISTS.
                     where=(MatchModel.status == MatchStatus.PENDING)
-                    & ~select(ClaimModel.id)
-                    .where(ClaimModel.match_id == MatchModel.id)
-                    .exists(),
+                    & MatchModel.id.not_in(select(ClaimModel.match_id)),
                 )
             )
         statement = self._visible_query(source.user_id).where(self._involves(source.id))
@@ -228,6 +229,7 @@ class SQLAlchemyObjectMatchRepository:
     def _to_domain(cls, row, user_id: UUID) -> ObjectMatch:
         match, lost, found = row
         mine, candidate = (lost, found) if lost.user_id == user_id else (found, lost)
+        review, namespace = cls._current_visual_review(match, mine, candidate)
         return ObjectMatch(
             id=match.id,
             evaluation=MatchEvaluation(
@@ -239,7 +241,65 @@ class SQLAlchemyObjectMatchRepository:
             my_report=cls._summary(mine),
             candidate_report=cls._summary(candidate),
             scoring_version=match.scoring_version,
+            visual_review=review,
+            visual_review_namespace=namespace,
         )
+
+    @staticmethod
+    def _current_visual_review(match, mine, candidate):
+        # Free text can refer to "first" and "second" images. Never swap a
+        # verdict from the other orientation, even if its hashes are reversed.
+        entries = match.visual_review or {}
+        entry = entries.get(str(mine.id))
+        if not isinstance(entry, dict) or mine.image is None or candidate.image is None:
+            return None, None
+        response = entry.get("response")
+        if not isinstance(response, dict) or (
+            response.get("source_sha256"),
+            response.get("candidate_sha256"),
+        ) != (mine.image.sha256, candidate.image.sha256):
+            return None, None
+        return {**response, "cached": True}, entry.get("namespace")
+
+    def save_visual_review(self, match_id, user_id, namespace, response) -> bool:
+        """Merge one orientation under a row lock; never overwrite match metrics."""
+        try:
+            # Lock only the match, avoiding FOR UPDATE on eager-loaded reports.
+            model = self.session.scalar(
+                select(MatchModel)
+                .where(MatchModel.id == match_id)
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            )
+            if model is None:
+                self.session.rollback()
+                return False
+            current = self.get_by_id_and_user(match_id, user_id)
+            if (
+                current is None
+                or current.my_report.image is None
+                or current.candidate_report.image is None
+            ):
+                self.session.rollback()
+                return False
+            if (response["source_sha256"], response["candidate_sha256"]) != (
+                current.my_report.image.sha256,
+                current.candidate_report.image.sha256,
+            ):
+                self.session.rollback()
+                return False
+            model.visual_review = {
+                **(model.visual_review or {}),
+                str(current.my_report.id): {
+                    "namespace": namespace,
+                    "response": response,
+                },
+            }
+            self.session.commit()
+            return True
+        except SQLAlchemyError:
+            self.session.rollback()
+            raise MatchPersistenceError from None
 
     def list_by_user(
         self,
@@ -249,9 +309,33 @@ class SQLAlchemyObjectMatchRepository:
         offset: int,
         level: MatchLevel | None = None,
         status: MatchStatus | None = None,
+        report_id: UUID | None = None,
     ) -> MatchPage:
         try:
             statement = self._visible_query(user_id)
+            # Hide archived cases from lists, while direct reads remain available
+            # to authorized chat participants with their original object context.
+            hidden_report = aliased(ReportModel)
+            statement = statement.where(
+                ~select(hidden_report.id)
+                .where(
+                    hidden_report.hidden_from_lists.is_(True),
+                    or_(
+                        hidden_report.id == MatchModel.lost_report_id,
+                        hidden_report.id == MatchModel.found_report_id,
+                    ),
+                )
+                .exists()
+            )
+            if report_id is not None:
+                # The selected report must belong to the caller, not merely
+                # be the other participant of one of their visible pairs.
+                owned = (
+                    select(ReportModel.id)
+                    .where(ReportModel.id == report_id, ReportModel.user_id == user_id)
+                    .exists()
+                )
+                statement = statement.where(self._involves(report_id), owned)
             if level is not None:
                 statement = statement.where(MatchModel.level == level)
             if status is not None:

@@ -73,6 +73,8 @@ class ObjectMatch:
     my_report: ReportSummary
     candidate_report: ReportSummary
     scoring_version: str = CURRENT_SCORING_VERSION
+    visual_review: dict | None = None
+    visual_review_namespace: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

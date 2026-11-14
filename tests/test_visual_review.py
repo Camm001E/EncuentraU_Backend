@@ -329,3 +329,114 @@ def test_generic_design_needs_two_specific_structural_agreements():
         result.model_copy(update={"same_parts_visible": False}).conservative().verdict
         == "uncertain"
     )
+
+
+def get_match(ctx, actor="A"):
+    response = ctx.client.get(
+        f"/api/v1/matches/{ctx.match_id}", headers=ctx.headers[actor]
+    )
+    assert response.status_code == 200, response.text
+    return response.json()
+
+
+def test_persisted_review_survives_cache_loss_and_preserves_metrics(review_context):
+    ctx, fake, cache = review_context
+    before = get_match(ctx)
+    first = request(ctx).json()
+    cache.entries.clear()
+    after = get_match(ctx)
+    assert after["visual_review"] == {**first, "cached": True}
+    for name in (
+        "percentage",
+        "identity_percentage",
+        "context_percentage",
+        "evidence_coverage",
+        "factors",
+        "warnings",
+        "level",
+        "status",
+    ):
+        assert after[name] == before[name]
+    listing = ctx.client.get("/api/v1/matches/me", headers=ctx.headers["A"]).json()
+    assert listing["items"][0]["visual_review"]["comparison"]["verdict"] == "different"
+    assert request(ctx).json()["cached"]
+    assert fake.compare.call_count == 1
+
+
+def test_persisted_review_is_orientation_specific(review_context):
+    ctx, fake, cache = review_context
+    first = request(ctx, "A").json()
+    assert get_match(ctx, "B")["visual_review"] is None
+    second = request(ctx, "B").json()
+    assert not second["cached"]
+    assert second["source_sha256"] == first["candidate_sha256"]
+    assert second["candidate_sha256"] == first["source_sha256"]
+    cache.entries.clear()
+    assert request(ctx, "A").json()["cached"]
+    assert request(ctx, "B").json()["cached"]
+    assert fake.compare.call_count == 2
+    assert (
+        get_match(ctx, "A")["visual_review"]["source_sha256"] == first["source_sha256"]
+    )
+    assert (
+        get_match(ctx, "B")["visual_review"]["source_sha256"] == second["source_sha256"]
+    )
+
+
+def test_get_hides_persisted_review_after_either_photo_changes(review_context):
+    ctx, fake, cache = review_context
+    request(ctx, "A")
+    request(ctx, "B")
+    upload(ctx, ctx.lost_id, "A", "green")
+    assert get_match(ctx, "A")["visual_review"] is None
+    assert get_match(ctx, "B")["visual_review"] is None
+    listing = ctx.client.get("/api/v1/matches/me", headers=ctx.headers["A"]).json()
+    assert listing["items"][0]["visual_review"] is None
+    cache.entries.clear()
+    assert not request(ctx, "A").json()["cached"]
+    assert fake.compare.call_count == 3
+
+
+def test_new_model_namespace_does_not_reuse_persisted_review(review_context):
+    ctx, fake, cache = review_context
+    request(ctx)
+    fake.namespace = "test-model-v2"
+    assert not request(ctx).json()["cached"]
+    assert fake.compare.call_count == 2
+    cache.entries.clear()
+    assert request(ctx).json()["cached"]
+    assert fake.compare.call_count == 2
+
+
+def test_persisted_reuse_does_not_reserve_quota():
+    review, images, fake, cache = use_case()
+    user = SimpleNamespace(id="user")
+    first = review("id", user)
+    match = review.repository.get_by_id_and_user.return_value
+    match.visual_review = first
+    match.visual_review_namespace = fake.namespace
+    review.quota = Mock()
+    cache.entries.clear()
+    assert review("id", user)["cached"]
+    review.quota.reserve.assert_not_called()
+    assert fake.compare.call_count == 1
+
+
+def test_database_failure_is_not_misreported_as_provider_error():
+    from app.domain.object_matches import MatchPersistenceError
+
+    review, _, fake, cache = use_case()
+    review.repository.save_visual_review.side_effect = MatchPersistenceError
+    with pytest.raises(MatchPersistenceError):
+        review("id", SimpleNamespace(id="user"))
+    assert fake.compare.call_count == 1
+    assert not cache.inflight and not cache.entries
+
+
+def test_failed_persistence_hash_recheck_does_not_cache_verdict():
+    review, _, fake, cache = use_case()
+    review.repository.save_visual_review.return_value = False
+    with pytest.raises(HTTPException) as exc:
+        review("id", SimpleNamespace(id="user"))
+    assert exc.value.status_code == 409
+    assert not cache.inflight and not cache.entries

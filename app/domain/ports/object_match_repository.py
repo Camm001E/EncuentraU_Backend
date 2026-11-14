@@ -39,6 +39,7 @@ class ObjectMatchRepository(Protocol):
         offset: int,
         level: MatchLevel | None = None,
         status: MatchStatus | None = None,
+        report_id: UUID | None = None,
     ) -> MatchPage: ...
 
     def get_by_id_and_user(
@@ -46,3 +47,9 @@ class ObjectMatchRepository(Protocol):
         match_id: UUID,
         user_id: UUID,
     ) -> ObjectMatch | None: ...
+
+    def save_visual_review(
+        self, match_id: UUID, user_id: UUID, namespace: str, response: dict
+    ) -> bool:
+        """Persist only if authorization and both current image hashes still match."""
+        ...

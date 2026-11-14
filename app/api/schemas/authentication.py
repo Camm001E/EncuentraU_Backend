@@ -58,6 +58,8 @@ class UserResponse(BaseModel):
     student_code: str
     role: UserRole
     is_active: bool
+    email_verified: bool = False
+    email_verification_required: bool = False
 
     @classmethod
     def from_user(cls, user: User) -> UserResponse:
@@ -68,6 +70,7 @@ class UserResponse(BaseModel):
             student_code=user.student_code,
             role=user.role,
             is_active=user.is_active,
+            email_verified=user.email_verified,
         )
 
 
@@ -76,3 +79,22 @@ class LoginResponse(BaseModel):
     token_type: Literal["bearer"] = "bearer"
     expires_in: int
     user: UserResponse
+
+
+class RecoveryRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
+    email: Annotated[EmailStr, Field(max_length=254)]
+
+    @field_validator("email", mode="before")
+    @classmethod
+    def normalize_email_field(cls, value: object) -> object:
+        return normalize_email(value) if isinstance(value, str) else value
+
+
+class RecoveryConfirmRequest(RecoveryRequest):
+    code: Annotated[str, Field(pattern=r"^[0-9]{8}$", repr=False)]
+    new_password: Annotated[SecretStr, Field(min_length=8, max_length=128)]
+
+
+class VerifyEmailRequest(LoginRequest):
+    code: Annotated[str, Field(pattern=r"^[0-9]{8}$", repr=False)]

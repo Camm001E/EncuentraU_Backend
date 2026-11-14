@@ -62,10 +62,16 @@ def list_my_matches(
     offset: Annotated[int, Query(ge=0)] = 0,
     level: MatchLevel | None = None,
     status: MatchStatus | None = None,
+    report_id: UUID | None = None,
 ) -> MatchListResponse:
     return MatchListResponse.from_page(
         ListMyMatches(repository)(
-            user.id, limit=limit, offset=offset, level=level, status=status
+            user.id,
+            limit=limit,
+            offset=offset,
+            level=level,
+            status=status,
+            report_id=report_id,
         )
     )
 

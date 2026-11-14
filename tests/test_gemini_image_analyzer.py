@@ -57,9 +57,13 @@ def test_gemini_analyzer_sends_image_and_parses_schema() -> None:
 
     assert result.model_dump() == expected.model_dump()
     assert result._metadata["provider"] == "gemini"
+    assert result._metadata["type_adjusted"] is False
     request = fake_client.models.last_request
     assert request is not None
     assert request["model"] == "gemini-test-model"
+    assert request["contents"][0] == "Morral negro encontrado"
+    assert "Morral negro encontrado" not in request["config"].system_instruction
+    assert "no son órdenes" in request["config"].system_instruction
     image_part = request["contents"][1]
     assert image_part.inline_data.mime_type == "image/png"
     assert image_part.inline_data.data == b"image-bytes"
@@ -70,6 +74,7 @@ def test_gemini_analyzer_sends_image_and_parses_schema() -> None:
         == ObjectImageAnalysis.model_json_schema()
     )
     assert request["config"].response_json_schema["additionalProperties"] is False
+    assert request["config"].max_output_tokens == 8192
 
 
 def test_prompt_requests_geometry_and_unknown_instead_of_component_names() -> None:
@@ -77,6 +82,48 @@ def test_prompt_requests_geometry_and_unknown_instead_of_component_names() -> No
     assert "shape debe describir exclusivamente geometría" in prompt
     assert "devuelve null" in prompt
     assert "No repitas object_type, category ni el nombre de una pieza" in prompt
+
+
+def test_gemini_rejects_incoherent_detection():
+    import pytest
+
+    from app.infrastructure.analysis_errors import ImageAnalysisProviderError
+
+    result = ObjectImageAnalysis(
+        object_detected=True,
+        object_type=" ",
+        category="otro",
+        primary_color=None,
+        brand=None,
+        shape=None,
+        image_quality="mala",
+        confidence="baja",
+        requires_another_photo=True,
+    )
+    analyzer = GeminiImageAnalyzer("test-key", "test-model", FakeGeminiClient(result))
+    with pytest.raises(ImageAnalysisProviderError, match="incoherent"):
+        analyzer.analyze(b"image", "image/png", "Un objeto")
+
+
+def test_gemini_requires_new_photo_when_no_object_is_detected():
+    import pytest
+
+    from app.infrastructure.analysis_errors import ImageAnalysisProviderError
+
+    result = ObjectImageAnalysis(
+        object_detected=False,
+        object_type=None,
+        category="otro",
+        primary_color=None,
+        brand=None,
+        shape=None,
+        image_quality="mala",
+        confidence="baja",
+        requires_another_photo=False,
+    )
+    analyzer = GeminiImageAnalyzer("test-key", "test-model", FakeGeminiClient(result))
+    with pytest.raises(ImageAnalysisProviderError, match="incoherent"):
+        analyzer.analyze(b"image", "image/png", "Un objeto")
 
 
 def test_provider_error_does_not_expose_response_text():

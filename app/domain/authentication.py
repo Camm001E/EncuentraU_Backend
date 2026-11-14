@@ -37,3 +37,22 @@ class InactiveUserError(AuthenticationError):
 
 class AuthenticationUnavailableError(AuthenticationError):
     message = "El servicio de autenticación no está disponible."
+
+
+class EmailVerificationRequiredError(AuthenticationError):
+    message = "Verifica tu correo antes de iniciar sesión."
+
+
+class InvalidVerificationCodeError(AuthenticationError):
+    message = "El código no es válido o venció. Solicita otro si es necesario."
+
+
+class EmailDeliveryUnavailableError(AuthenticationError):
+    message = "No pudimos enviar el código. Tu cuenta se conserva; intenta más tarde."
+
+
+class VerificationRateLimitError(AuthenticationError):
+    message = "Espera antes de solicitar otro código."
+
+    def __init__(self, retry_after: int):
+        self.retry_after = max(1, retry_after)

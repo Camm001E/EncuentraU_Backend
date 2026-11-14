@@ -97,14 +97,23 @@ def test_metadata_contains_all_tables_and_no_binary_image_columns(engine) -> Non
         "messages",
         "deliveries",
         "delivery_events",
+        "ai_quota_counters",
+        "email_delivery_budget",
     }
     for table in Base.metadata.tables.values():
+        assert not any(isinstance(column.type, LargeBinary) for column in table.c)
+        if table.name == "email_delivery_budget":
+            assert set(table.c.keys()) == {"id", "day", "sent", "last_sent_at"}
+            continue
+        if table.name == "ai_quota_counters":
+            assert set(table.c.keys()) == {"scope", "bucket", "used", "expires_at"}
+            assert set(table.primary_key.columns.keys()) == {"scope", "bucket"}
+            continue
         if table.name == "conversation_participants":
             assert {"conversation_id", "user_id", "joined_at"}.issubset(table.c.keys())
             continue
         assert "id" in table.c
         assert "created_at" in table.c
-        assert not any(isinstance(column.type, LargeBinary) for column in table.c)
     assert "updated_at" in User.__table__.c
     assert "updated_at" in ObjectReport.__table__.c
 
