@@ -4,6 +4,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Query
 
 from app.api.auth_errors import AuthRoute
+from app.api.dependencies.ai_quota import AIQuotaGuard, get_ai_quota
 from app.api.dependencies.authentication import get_current_user
 from app.api.dependencies.object_matches import (
     get_match_repository,
@@ -84,5 +85,6 @@ def review_match_photos(
     images: Annotated[ReportImageService, Depends(get_report_image_service)],
     analyzer: Annotated[VisualPairAnalyzer, Depends(get_visual_pair_analyzer)],
     cache: Annotated[VisualReviewCache, Depends(get_visual_review_cache)],
+    quota: Annotated[AIQuotaGuard, Depends(get_ai_quota)],
 ) -> dict:
-    return ReviewMatchPhotos(repository, images, analyzer, cache)(match_id, user)
+    return ReviewMatchPhotos(repository, images, analyzer, cache, quota)(match_id, user)

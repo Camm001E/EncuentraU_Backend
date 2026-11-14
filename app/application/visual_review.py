@@ -4,6 +4,7 @@ from time import monotonic
 
 from fastapi import HTTPException
 
+from app.domain.ai_quota import COMPARISON_UNITS
 from app.domain.object_matches import MatchNotFoundError
 from app.infrastructure.analysis_errors import ImageAnalysisProviderError
 
@@ -38,9 +39,10 @@ class VisualReviewCache:
 
 
 class ReviewMatchPhotos:
-    def __init__(self, repository, images, analyzer, cache):
+    def __init__(self, repository, images, analyzer, cache, quota=None):
         self.repository, self.images = repository, images
         self.analyzer, self.cache = analyzer, cache
+        self.quota = quota
 
     def __call__(self, match_id, user):
         match = self.repository.get_by_id_and_user(match_id, user.id)
@@ -72,6 +74,8 @@ class ReviewMatchPhotos:
                 if cached is not None:
                     response = cached
                 else:
+                    if self.quota is not None:
+                        self.quota.reserve(user.id, COMPARISON_UNITS)
                     result, metadata = self.analyzer.compare(
                         [
                             (a.data, a.reference.content_type),
