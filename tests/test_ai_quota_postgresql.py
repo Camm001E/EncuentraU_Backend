@@ -88,3 +88,28 @@ def test_new_ledger_and_connections_do_not_reset_allowance(ledger):
     with pytest.raises(QuotaExceeded):
         fresh.reserve("one", 2)
     fresh.reserve("two", 2)
+
+
+def test_global_allowance_is_shared_between_accounts(ledger):
+    ledger.settings.ai_quota_global_day = 6
+    for user in ("one", "two", "three"):
+        ledger.reserve(user, 2)
+    with pytest.raises(QuotaExceeded):
+        ledger.reserve("four", 2)
+    with ledger.engine.connect() as c:
+        assert (
+            c.execute(
+                text(
+                    "SELECT count(*) FROM ai_quota_counters WHERE scope LIKE 'user:four:%'"
+                )
+            ).scalar_one()
+            == 0
+        )
+
+
+def test_monthly_allowance_independently_stops_spending(ledger):
+    ledger.settings.ai_quota_global_month = 3
+    ledger.reserve("one", 3)
+    with pytest.raises(QuotaExceeded) as exc:
+        ledger.reserve("two", 2)
+    assert exc.value.retry_after > 0
