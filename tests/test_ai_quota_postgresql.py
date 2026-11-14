@@ -62,3 +62,29 @@ def test_parallel_requests_cannot_overspend(ledger):
         assert c.execute(
             text("SELECT min(used),max(used) FROM ai_quota_counters")
         ).one() == (6, 6)
+
+
+def test_denied_reservation_changes_no_counter(ledger):
+    ledger.reserve("one", 3)
+    ledger.reserve("one", 3)
+    with ledger.engine.connect() as c:
+        before = c.execute(
+            text("SELECT scope,bucket,used FROM ai_quota_counters ORDER BY scope")
+        ).all()
+    with pytest.raises(QuotaExceeded):
+        ledger.reserve("one", 2)
+    with ledger.engine.connect() as c:
+        after = c.execute(
+            text("SELECT scope,bucket,used FROM ai_quota_counters ORDER BY scope")
+        ).all()
+    assert after == before
+
+
+def test_new_ledger_and_connections_do_not_reset_allowance(ledger):
+    ledger.reserve("one", 3)
+    ledger.reserve("one", 3)
+    ledger.engine.dispose()
+    fresh = PostgresAIQuota(ledger.settings, ledger.engine)
+    with pytest.raises(QuotaExceeded):
+        fresh.reserve("one", 2)
+    fresh.reserve("two", 2)
