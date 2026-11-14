@@ -367,7 +367,9 @@ def test_policy_thresholds_and_group_shares_are_applied(
         "_group_result",
         lambda _, group: (identity if group.value == "identity" else context, 100),
     )
-    obj = MatchableObject(object_type="mochila")
+    obj = MatchableObject(
+        object_type="mochila", visible_features=["parche triangular rojo"]
+    )
     result = service.evaluate(MatchRequest(lost=obj, found=obj))
     assert result.percentage == percentage
     assert result.level.value == level

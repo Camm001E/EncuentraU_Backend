@@ -21,7 +21,27 @@ def overlap(left: frozenset, right: frozenset) -> float | None:
 
 def object_type_similarity(left: str | None, right: str | None) -> float | None:
     modifiers = GENERIC | ADJECTIVES | set(GEOMETRY.values())
-    return overlap(tokens(left) - modifiers, tokens(right) - modifiers)
+    a, b = tokens(left) - modifiers, tokens(right) - modifiers
+    # Wallet terminology varies by provider. Keep this alias scoped to types.
+    aliases = {
+        "cartera": "billetera",
+        "cosmetiquera": "neceser",
+        "paraguas": "sombrilla",
+        "archivador": "carpeta",
+        "smartphone": "telefono",
+        "celular": "telefono",
+        "movil": "telefono",
+        "funda": "estuche",
+    }
+    a = frozenset(aliases.get(w, w) for w in a)
+    b = frozenset(aliases.get(w, w) for w in b)
+    # A generic case can be a pencil case; explicit different uses must not
+    # become equivalent (e.g. earphone case versus pencil case).
+    if (a == {"estuche"} and bool({"cartuchera", "neceser"} & b)) or (
+        b == {"estuche"} and bool({"cartuchera", "neceser"} & a)
+    ):
+        return 0.8
+    return overlap(a, b)
 
 
 @dataclass(frozen=True)

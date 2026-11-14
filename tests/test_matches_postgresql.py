@@ -218,7 +218,9 @@ def test_temporal_boundaries_are_inclusive(reports, days):
 def test_reports_without_image_analysis_still_match(reports):
     lost, _ = pair(reports, with_analysis=False)
     match = generated(reports, lost["id"])["items"][0]
-    assert match["level"] == "high"
+    # Generic attributes remain candidates, but cannot establish high identity.
+    assert match["level"] == "possible"
+    assert match["percentage"] < 85
     visual = next(
         factor for factor in match["factors"] if factor["name"] == "visual_features"
     )
@@ -688,3 +690,15 @@ def test_matches_are_sorted_by_creation_date_when_scores_are_equal(reports):
     page = reports.client.get(f"{MATCHES}/me", headers=reports.headers).json()
     assert page["items"][0]["id"] == items[1]["id"]
     assert page["items"][0]["percentage"] == page["items"][1]["percentage"]
+
+
+def test_persisted_photo_quality_warning_reaches_generated_match(reports):
+    analysis = {"extracted_data": {
+        "requires_another_photo": True, "image_quality": "mala",
+        "visible_features": ["parche triangular rojo"],
+    }, "confidence": "baja"}
+    lost = create_report(reports, "lost", with_analysis=False, analysis=analysis)
+    create_report(reports, "found", mine=False, with_analysis=False, analysis=analysis)
+    match = generated(reports, lost["id"])["items"][0]
+    assert match["level"] == "possible"
+    assert any("otra fotografia" in w for w in match["warnings"])

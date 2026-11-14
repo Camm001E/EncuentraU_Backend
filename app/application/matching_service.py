@@ -120,6 +120,22 @@ class MatchingService:
         percentage = round(
             identity * self._identity_share + context * self._context_share
         )
+        # Context and generic attributes cannot independently establish identity.
+        # A high result needs corroborating descriptive evidence without an
+        # explicit contradiction in either descriptive channel.
+        insufficient_photo = any(
+            obj.requires_another_photo or obj.image_quality == "mala"
+            for obj in (lost, found)
+        )
+        strong_evidence = (
+            not insufficient_photo
+            and max(visual.similarity or 0, description.similarity or 0) >= 0.75
+            and not visual.contradictions
+            and not description.contradictions
+        )
+        limited_identity = percentage >= self._high_threshold and not strong_evidence
+        if limited_identity:
+            percentage = self._high_threshold - 1
         if not compatible:
             percentage = min(percentage, self._incompatible_ceiling)
         if compatible and percentage >= self._high_threshold:
@@ -150,6 +166,16 @@ class MatchingService:
                 if comparison.contradictions:
                     factor.explanation += " " + " ".join(comparison.contradictions)
         warnings = sorted(set(visual.contradictions + description.contradictions))
+        if insufficient_photo:
+            warnings.append(
+                "Se necesita otra fotografia: al menos un analisis indica calidad "
+                "insuficiente. La coincidencia no puede clasificarse como alta."
+            )
+        if limited_identity and not insufficient_photo:
+            warnings.append(
+                "Coincidencia limitada a posible: falta evidencia descriptiva "
+                "consistente para una coincidencia alta. Requiere revisión humana."
+            )
         if not compatible:
             warnings.append("Tipos de objeto incompatibles: similitud inferior al 35%.")
         lost_secondary = self._colors(lost.secondary_colors)

@@ -14,12 +14,13 @@ UNKNOWN = frozenset(
     }
 )
 STOPWORDS = frozenset(
-    "a al con de del el en es la las lo los para por que se su "
+    "a al con de del el en es la las lo los para por que se su sus "
     "un una unos unas y o sobre alrededor cerca como forma".split()
 )
 REPORT_WORDS = frozenset(
     "perdi perdido perdida encontre encontrado encontrada hallado hallada "
-    "extraviado extraviada hoy ayer manana dia fecha".split()
+    "extraviado extraviada hoy ayer manana dia fecha reportado reportada "
+    "identificar caracteristica visible prueba analisis imagen foto".split()
 )
 GENERIC = frozenset(
     "objeto producto parte pieza detalle decorativo decoracion pequeno grande "

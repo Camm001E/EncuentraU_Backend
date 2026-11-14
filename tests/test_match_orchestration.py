@@ -127,5 +127,5 @@ def test_full_report_description_is_supported_without_truncation():
     assert result.description == description.strip()
     assert (
         MatchingService().evaluate(MatchRequest(lost=result, found=result)).level
-        == "high"
+        == "possible"
     )

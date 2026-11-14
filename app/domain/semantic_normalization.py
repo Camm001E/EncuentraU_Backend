@@ -156,7 +156,8 @@ def description_features(
     observations = [
         (canonical, _inflection(raw) in ADJECTIVES)
         for raw in normalize(value).split()
-        if (canonical := word(raw)) not in excluded | REPORT_WORDS
+        if raw not in REPORT_WORDS
+        and (canonical := word(raw)) not in excluded | REPORT_WORDS
     ]
     sequence = [canonical for canonical, _ in observations]
     starts = []

@@ -50,6 +50,10 @@ def to_matchable_object(report: ObjectReport) -> MatchableObject:
             )
         )[:maximum]
 
+    quality = data.get("image_quality")
+    if not isinstance(quality, str) or quality not in {"mala", "regular", "buena"}:
+        quality = None
+
     return MatchableObject(
         object_type=attributes.object_type,
         category=attributes.category,
@@ -60,6 +64,8 @@ def to_matchable_object(report: ObjectReport) -> MatchableObject:
         shape=attributes.shape or image_text("shape", 500),
         visible_features=image_list("visible_features", 50, 2000),
         visible_text=image_list("visible_text", 50, 2000),
+        requires_another_photo=data.get("requires_another_photo") is True,
+        image_quality=quality,
         description=attributes.description,
         location=attributes.location,
         event_date=attributes.event_date,
