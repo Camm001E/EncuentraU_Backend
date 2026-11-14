@@ -44,6 +44,7 @@ def test_postgresql_migrations_constraints_json_and_health(monkeypatch) -> None:
                 command.upgrade(config, "head")
                 inspector = inspect(connection)
                 assert set(inspector.get_table_names()) == {
+                    "ai_quota_counters",
                     "users",
                     "object_reports",
                     "image_analyses",

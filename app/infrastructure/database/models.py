@@ -40,6 +40,20 @@ from app.infrastructure.database.base import Base
 JSON_DATA = JSON().with_variant(JSONB(), "postgresql")
 
 
+class AIQuotaCounter(Base):
+    __tablename__ = "ai_quota_counters"
+    __table_args__ = (
+        CheckConstraint("used >= 0", name="ck_ai_quota_nonnegative"),
+        Index("ix_ai_quota_expiry", "expires_at"),
+    )
+    scope: Mapped[str] = mapped_column(String(80), primary_key=True)
+    bucket: Mapped[str] = mapped_column(String(40), primary_key=True)
+    used: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    expires_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+
+
 class UUIDPrimaryKey:
     id: Mapped[UUID] = mapped_column(
         Uuid(as_uuid=True), primary_key=True, default=uuid4
