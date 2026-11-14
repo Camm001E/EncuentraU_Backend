@@ -21,6 +21,13 @@ class PostgresAIQuota:
             with (self.engine or get_engine()).begin() as connection:
                 connection.execute(text("SET LOCAL lock_timeout = '3s'"))
                 now = connection.execute(text("SELECT clock_timestamp()")).scalar_one()
+                connection.execute(
+                    text(
+                        "DELETE FROM ai_quota_counters "
+                        "WHERE expires_at < :now - INTERVAL '40 days'"
+                    ),
+                    {"now": now},
+                )
                 windows = quota_windows(user_id, now, self.settings)
                 locked = []
                 for window in windows:
