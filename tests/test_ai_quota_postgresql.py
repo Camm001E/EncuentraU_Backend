@@ -113,3 +113,16 @@ def test_monthly_allowance_independently_stops_spending(ledger):
     with pytest.raises(QuotaExceeded) as exc:
         ledger.reserve("two", 2)
     assert exc.value.retry_after > 0
+
+
+def test_obsolete_counter_cleanup_preserves_recent_history(ledger):
+    with ledger.engine.begin() as c:
+        c.execute(
+            text(
+                "INSERT INTO ai_quota_counters VALUES ('old','old',2,now()-interval '45 days'),('recent','recent',2,now()-interval '1 day')"
+            )
+        )
+    ledger.reserve("one", 2)
+    with ledger.engine.connect() as c:
+        scopes = set(c.execute(text("SELECT scope FROM ai_quota_counters")).scalars())
+    assert "old" not in scopes and "recent" in scopes
