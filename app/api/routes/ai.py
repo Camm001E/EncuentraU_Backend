@@ -4,10 +4,13 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
 from starlette.concurrency import run_in_threadpool
 
+from app.api.dependencies.ai_quota import AIQuotaGuard, get_ai_quota
 from app.api.dependencies.authentication import get_current_user
 from app.core.config import get_settings
+from app.domain.ai_quota import ANALYSIS_UNITS
 from app.domain.image_analysis import ObjectImageAnalysis
 from app.domain.ports.image_analyzer import ImageAnalyzer
+from app.domain.users import User
 from app.infrastructure.analysis_receipt import issue_receipt
 from app.infrastructure.gemini_image_analyzer import (
     ImageAnalysisProviderError,
@@ -49,6 +52,8 @@ async def analyze_object_image(
         File(description="Fotografía JPEG, PNG o WEBP del objeto."),
     ],
     analyzer: Annotated[ImageAnalyzer, Depends(get_image_analyzer)],
+    user: Annotated[User, Depends(get_current_user)],
+    quota: Annotated[AIQuotaGuard, Depends(get_ai_quota)],
 ) -> ObjectImageAnalysis:
     settings = get_settings()
     mime_type = image.content_type or ""
@@ -75,6 +80,8 @@ async def analyze_object_image(
                 f"La fotografía supera el límite de {settings.max_image_size_mb} MB."
             ),
         )
+
+    await run_in_threadpool(quota.reserve, user.id, ANALYSIS_UNITS)
 
     try:
         result = await run_in_threadpool(
