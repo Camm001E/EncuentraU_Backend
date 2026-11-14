@@ -25,6 +25,7 @@ from app.application.conversations import (
 from app.domain.ownership import DEFAULT_PAGE_LIMIT, MAX_PAGE_LIMIT
 from app.domain.ports.ownership import ConversationRepository
 from app.domain.users import User
+from app.infrastructure.chat_events import publish_chat_change
 
 router = APIRouter(
     prefix="/conversations",
@@ -78,11 +79,14 @@ def send_message(
     user: CurrentUser,
     repository: Repository,
 ):
-    return MessageResponse.from_message(
+    result = MessageResponse.from_message(
         SendMessage(repository)(
             conversation_id, user, request.body, request.client_message_id
         )
     )
+
+    publish_chat_change(conversation_id)
+    return result
 
 
 @router.post("/{conversation_id}/read", status_code=204)

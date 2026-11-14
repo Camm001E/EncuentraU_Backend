@@ -21,9 +21,15 @@ ANALYSIS_PROVIDER = "gemini"
 
 
 class CreateObjectReport:
-    def __init__(self, repository: ObjectReportRepository, model: str):
+    def __init__(
+        self,
+        repository: ObjectReportRepository,
+        model: str,
+        provider: str = ANALYSIS_PROVIDER,
+    ):
         self.repository = repository
         self.model = model
+        self.provider = provider
 
     def __call__(
         self,
@@ -44,7 +50,7 @@ class CreateObjectReport:
                     ImageAnalysis(
                         id=uuid4(),
                         report_id=report_id,
-                        provider=ANALYSIS_PROVIDER,
+                        provider=self.provider,
                         model=self.model,
                         data=analysis,
                     )

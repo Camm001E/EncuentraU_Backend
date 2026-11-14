@@ -4,15 +4,27 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
 from starlette.concurrency import run_in_threadpool
 
+from app.api.dependencies.authentication import get_current_user
 from app.core.config import get_settings
 from app.domain.image_analysis import ObjectImageAnalysis
 from app.domain.ports.image_analyzer import ImageAnalyzer
+from app.infrastructure.analysis_receipt import issue_receipt
 from app.infrastructure.gemini_image_analyzer import (
     ImageAnalysisProviderError,
     get_image_analyzer,
 )
 
-router = APIRouter(prefix="/ai", tags=["artificial-intelligence"])
+
+class AIAnalysisResponse(ObjectImageAnalysis):
+    analysis_metadata: dict | None = None
+    analysis_receipt: str | None = None
+
+
+router = APIRouter(
+    prefix="/ai",
+    tags=["artificial-intelligence"],
+    dependencies=[Depends(get_current_user)],
+)
 logger = logging.getLogger(__name__)
 
 ALLOWED_IMAGE_TYPES = {"image/jpeg", "image/png", "image/webp"}
@@ -20,7 +32,7 @@ ALLOWED_IMAGE_TYPES = {"image/jpeg", "image/png", "image/webp"}
 
 @router.post(
     "/analyze",
-    response_model=ObjectImageAnalysis,
+    response_model=AIAnalysisResponse,
     summary="Analizar la fotografía de un objeto",
 )
 async def analyze_object_image(
@@ -65,15 +77,28 @@ async def analyze_object_image(
         )
 
     try:
-        return await run_in_threadpool(
+        result = await run_in_threadpool(
             analyzer.analyze,
             image_bytes,
             mime_type,
             description.strip(),
         )
+        return AIAnalysisResponse(
+            **result.model_dump(),
+            analysis_metadata=result._metadata or None,
+            analysis_receipt=issue_receipt(result, settings),
+        )
     except ImageAnalysisProviderError as exc:
-        logger.exception("Gemini image analysis failed")
+        logger.warning("AI analysis failed reason=%s", exc.reason)
         raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail="Gemini no pudo analizar la fotografía. Intenta nuevamente.",
-        ) from exc
+            status_code=(
+                status.HTTP_503_SERVICE_UNAVAILABLE
+                if exc.reason == "configuration_or_access"
+                else status.HTTP_502_BAD_GATEWAY
+            ),
+            detail=(
+                "Revisa la configuración y el acceso del proveedor de IA."
+                if exc.reason == "configuration_or_access"
+                else "No se pudo analizar la fotografía. Intenta nuevamente."
+            ),
+        ) from None

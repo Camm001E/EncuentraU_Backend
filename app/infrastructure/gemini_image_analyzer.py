@@ -1,18 +1,13 @@
 from functools import lru_cache
 from typing import Any
 
-from fastapi import HTTPException, status
 from google import genai
-from google.genai import types
+from google.genai import errors, types
 from pydantic import ValidationError
 
-from app.core.config import get_settings
 from app.domain.image_analysis import ObjectImageAnalysis
 from app.domain.ports.image_analyzer import ImageAnalyzer
-
-
-class ImageAnalysisProviderError(RuntimeError):
-    """Raised when the external vision provider returns an unusable result."""
+from app.infrastructure.analysis_errors import ImageAnalysisProviderError
 
 
 def build_analysis_prompt(description: str) -> str:
@@ -49,9 +44,16 @@ class GeminiImageAnalyzer(ImageAnalyzer):
         api_key: str,
         model: str,
         client: Any | None = None,
+        timeout_seconds: float = 60,
     ) -> None:
         self._model = model
-        self._client = client or genai.Client(api_key=api_key)
+        self._client = client or genai.Client(
+            api_key=api_key,
+            http_options=types.HttpOptions(
+                timeout=int(timeout_seconds * 1000),
+                retry_options=types.HttpRetryOptions(attempts=1),
+            ),
+        )
 
     def analyze(
         self,
@@ -76,32 +78,43 @@ class GeminiImageAnalyzer(ImageAnalyzer):
             )
 
             if isinstance(response.parsed, ObjectImageAnalysis):
-                return response.parsed
-            if not response.text:
-                raise ImageAnalysisProviderError("Gemini devolvió una respuesta vacía.")
-            return ObjectImageAnalysis.model_validate_json(response.text)
+                result = response.parsed
+            else:
+                result = ObjectImageAnalysis.model_validate_json(
+                    response.text, strict=True
+                )
+            usage = getattr(response, "usage_metadata", None)
+            result._metadata = {
+                "provider": "gemini",
+                "model": getattr(response, "model_version", None) or self._model,
+                "usage": usage.model_dump() if usage is not None else None,
+            }
+            return result
         except ImageAnalysisProviderError:
             raise
-        except (ValidationError, ValueError, TypeError) as exc:
+        except errors.APIError as exc:
+            # Never include provider response text: it may echo user content.
+            if exc.code in {408, 429} or 500 <= exc.code < 600:
+                reason = "gemini_temporarily_unavailable"
+            elif exc.code in {401, 403}:
+                reason = "gemini_authentication_or_access"
+            else:
+                reason = "gemini_request_rejected"
+            raise ImageAnalysisProviderError(reason) from None
+        except (ValidationError, ValueError, TypeError):
             raise ImageAnalysisProviderError(
                 "Gemini devolvió un JSON que no cumple el contrato."
-            ) from exc
-        except Exception as exc:
+            ) from None
+        except Exception:
             raise ImageAnalysisProviderError(
                 "No fue posible comunicarse con Gemini."
-            ) from exc
+            ) from None
 
 
 @lru_cache
 def get_image_analyzer() -> ImageAnalyzer:
-    settings = get_settings()
-    if settings.gemini_api_key is None:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="GEMINI_API_KEY no está configurada en backend/.env.",
-        )
+    # Keep this dependency callable stable for existing clients/tests.
+    from app.core.config import get_settings
+    from app.infrastructure.analysis_provider import build_image_analyzer
 
-    return GeminiImageAnalyzer(
-        api_key=settings.gemini_api_key.get_secret_value(),
-        model=settings.gemini_model,
-    )
+    return build_image_analyzer(get_settings())

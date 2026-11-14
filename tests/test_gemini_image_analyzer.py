@@ -55,7 +55,8 @@ def test_gemini_analyzer_sends_image_and_parses_schema() -> None:
         description="Morral negro encontrado",
     )
 
-    assert result == expected
+    assert result.model_dump() == expected.model_dump()
+    assert result._metadata["provider"] == "gemini"
     request = fake_client.models.last_request
     assert request is not None
     assert request["model"] == "gemini-test-model"
@@ -76,3 +77,23 @@ def test_prompt_requests_geometry_and_unknown_instead_of_component_names() -> No
     assert "shape debe describir exclusivamente geometría" in prompt
     assert "devuelve null" in prompt
     assert "No repitas object_type, category ni el nombre de una pieza" in prompt
+
+
+def test_provider_error_does_not_expose_response_text():
+    import pytest
+    from google.genai.errors import ServerError
+
+    from app.infrastructure.analysis_errors import ImageAnalysisProviderError
+
+    class FailingModels:
+        def generate_content(self, **kwargs):
+            raise ServerError(503, {"error": {"message": "private user content"}})
+
+    class FailingClient:
+        models = FailingModels()
+
+    analyzer = GeminiImageAnalyzer("test-key", "test-model", client=FailingClient())
+    with pytest.raises(ImageAnalysisProviderError) as caught:
+        analyzer.analyze(b"image", "image/jpeg", "test")
+    assert caught.value.reason == "gemini_temporarily_unavailable"
+    assert "private" not in str(caught.value)

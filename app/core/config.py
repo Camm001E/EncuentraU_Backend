@@ -10,10 +10,18 @@ BACKEND_DIR = Path(__file__).resolve().parents[2]
 
 
 class Settings(BaseSettings):
+    redis_url: SecretStr | None = Field(default=None, repr=False)
     app_name: str = "EncuentraU AI API"
     api_prefix: str = "/api/v1"
     gemini_api_key: SecretStr | None = None
     gemini_model: str = "gemini-3.5-flash"
+    openai_api_key: SecretStr | None = Field(default=None, repr=False)
+    openai_model: str = Field(default="gpt-5.4-mini", min_length=1, max_length=100)
+    openai_reasoning_effort: Literal["none", "low", "medium", "high", "xhigh"] = "high"
+    openai_max_output_tokens: int = Field(default=8192, ge=1024, le=32768)
+    ai_primary_provider: Literal["openai", "gemini"] = "gemini"
+    ai_fallback_provider: Literal["none", "gemini"] = "none"
+    ai_timeout_seconds: float = Field(default=60, gt=0, le=120)
     max_image_size_mb: int = 10
     cors_origins: str = "http://localhost:3000,http://localhost:8080"
     database_url: SecretStr | None = Field(default=None, repr=False)

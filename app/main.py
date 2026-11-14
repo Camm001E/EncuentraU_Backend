@@ -8,6 +8,7 @@ from app.api.match_errors import register_match_error_handlers
 from app.api.report_errors import register_report_error_handlers
 from app.api.routes.ai import router as ai_router
 from app.api.routes.auth import router as auth_router
+from app.api.routes.chat_socket import router as chat_socket_router
 from app.api.routes.conversations import router as conversations_router
 from app.api.routes.database import router as database_router
 from app.api.routes.deliveries import router as deliveries_router
@@ -53,9 +54,13 @@ def create_app() -> FastAPI:
         return {
             "status": "ok",
             "phase": "phase-1",
-            "model": settings.gemini_model,
+            "model": settings.openai_model
+            if settings.ai_primary_provider == "openai"
+            else settings.gemini_model,
+            "provider": settings.ai_primary_provider,
         }
 
+    app.include_router(chat_socket_router, prefix=settings.api_prefix)
     app.include_router(ai_router, prefix=settings.api_prefix)
     app.include_router(auth_router, prefix=settings.api_prefix)
     app.include_router(matches_router, prefix=settings.api_prefix)

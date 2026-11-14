@@ -1,6 +1,6 @@
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
 
 ObjectCategory = Literal[
     "electronica",
@@ -17,6 +17,8 @@ ConfidenceLevel = Literal["baja", "media", "alta"]
 
 class ObjectImageAnalysis(BaseModel):
     """Stable JSON contract returned by the visual-analysis provider."""
+
+    _metadata: dict = PrivateAttr(default_factory=dict)
 
     model_config = ConfigDict(extra="forbid")
 

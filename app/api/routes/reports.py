@@ -23,6 +23,7 @@ from app.core.config import Settings, get_settings
 from app.domain.object_reports import ReportStatus, ReportType
 from app.domain.ports.object_report_repository import ObjectReportRepository
 from app.domain.users import User
+from app.infrastructure.analysis_receipt import verify_receipt
 
 router = APIRouter(prefix="/reports", tags=["reports"], route_class=AuthRoute)
 CurrentUser = Annotated[User, Depends(get_current_user)]
@@ -36,7 +37,18 @@ def create_report(
     repository: Repository,
     settings: Annotated[Settings, Depends(get_settings)],
 ) -> ReportResponse:
-    result = CreateObjectReport(repository, settings.gemini_model)(
+    provider, model = "unknown", "unknown"
+    if body.analysis is not None:
+        evidence = body.analysis.extracted_data
+        receipt = evidence.pop("analysis_receipt", None)
+        if receipt is not None:
+            metadata = verify_receipt(receipt, evidence, settings)
+            provider, model = metadata["provider"], metadata["model"]
+            evidence["analysis_metadata"] = metadata
+        elif settings.ai_primary_provider == "gemini":
+            # Compatibility for old Flutter clients that predate receipts.
+            provider, model = "gemini", settings.gemini_model
+    result = CreateObjectReport(repository, model, provider)(
         user_id=user.id,
         report_type=body.report_type,
         attributes=body.to_attributes(),
