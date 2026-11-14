@@ -977,3 +977,168 @@ cancelar sus reportes ni modificar fotografías (409). Tras un rechazo pueden
 editarse nuevamente si permanecen activos. Las fotografías y mensajes conservan
 sus permisos después del cierre. Terceros reciben 404; estudiantes en admin, 403.
 No hay entrega automática, pagos, ubicación en tiempo real ni nuevas llamadas IA.
+
+
+## OpenAI con respaldo Gemini
+
+El analizador conserva los campos visuales de Flutter y el comparador `semantic-v2`.
+OpenAI usa Responses API con imagen de detalle alto, JSON Schema estricto y
+`store=false`. Configuración en `.env` (ignorado por Git):
+
+| Variable | Configuración para las pruebas |
+| --- | --- |
+| `AI_PRIMARY_PROVIDER` | `openai` |
+| `AI_FALLBACK_PROVIDER` | `gemini`; `none` desactiva el respaldo |
+| `OPENAI_MODEL` | `gpt-5.4-mini` |
+| `OPENAI_REASONING_EFFORT` | `high` |
+| `OPENAI_MAX_OUTPUT_TOKENS` | `8192` |
+| `AI_TIMEOUT_SECONDS` | `60` por proveedor |
+
+Las claves solo van en `.env`. Instalar con `python -m pip install -r requirements-dev.txt`.
+El modelo elegido debe soportar imagen, Structured Outputs y el esfuerzo configurado.
+La fábrica conserva Gemini como valor por defecto para instalaciones antiguas;
+la selección OpenAI está explícita en la configuración local y el ejemplo.
+
+Hay un intento por proveedor, sin reintentos automáticos. OpenAI permite respaldo
+ante conexión/timeout, HTTP 408/409/429 (salvo cuota agotada), 5xx, JSON inválido,
+respuesta incompleta o incoherente. Clave, acceso, modelo/configuración incorrectos,
+cuota agotada y rechazo del modelo no activan respaldo. Si Gemini también falla,
+se devuelve un error controlado; `/ai/analyze` no escribe reportes ni fotos.
+El timeout de Flutter es 150 segundos para permitir ambos intentos. Los timeouts
+HTTP son de transporte, no una garantía estricta del tiempo total de pared.
+
+La respuesta agrega `analysis_metadata` y `analysis_receipt` opcionales. Los campos
+visuales existentes permanecen. El comprobante firmado vincula la evidencia al
+proveedor/modelo y se conserva en Flutter al crear el reporte. El servidor verifica
+la firma y la evidencia antes de persistir; guarda la procedencia real, el uso de
+fallback, duración y consumo informado. No almacena fotos ni descripciones en logs.
+El comprobante acredita procedencia del análisis, no propiedad del objeto.
+Sin comprobante, los clientes antiguos en modo Gemini mantienen su comportamiento;
+en modo OpenAI la procedencia se marca `unknown`, sin atribuir un proveedor inventado.
+Se requiere `JWT_SECRET_KEY` para emitir comprobantes verificables.
+
+Pruebas ordinarias (sin consumo de proveedores):
+
+```powershell
+.\.venv\Scripts\python.exe -m pytest
+.\.venv\Scripts\python.exe -m ruff check app tests
+```
+
+Pruebas reales explícitas, separadas y con fallback desactivado:
+
+```powershell
+.\.venv\Scripts\python.exe -m app.cli.check_ai --synthetic --provider openai --output build/ai-validation/openai-synthetic.json
+.\.venv\Scripts\python.exe -m app.cli.check_ai --image "<foto-acordada.png>" --provider openai --output build/ai-validation/A1-openai.json
+.\.venv\Scripts\python.exe -m app.cli.check_ai --image "<foto-acordada.png>" --provider gemini --output build/ai-validation/A1-gemini.json
+```
+
+Cada comando realiza como máximo una llamada al proveedor elegido. Los resultados
+incluyen evidencia, modelo real, versión del análisis/comparador, duración y uso
+cuando el proveedor lo informa. Se guardan únicamente bajo `build/`, ignorado por Git.
+Utilizar las mismas imágenes A1/A2, B1/B2 y C1/C2 para comparar; este comando valida
+la extracción, no calcula una probabilidad de identidad ni evalúa por sí solo la
+precisión del motor. Las pruebas PostgreSQL y el recorrido completo requieren una
+base de pruebas separada y aún deben ejecutarse antes de publicar.
+
+Referencias: [Structured Outputs](https://developers.openai.com/api/docs/guides/structured-outputs)
+y [GPT-5.4 mini](https://developers.openai.com/api/docs/models/gpt-5.4-mini).
+
+
+### Matching semantic-v3
+
+El comparador distingue nombres equivalentes de tipos en un vocabulario acotado,
+excluye frases genericas de reporte de la evidencia de identidad y exige evidencia
+descriptiva consistente antes de asignar el nivel alto. Fecha, lugar, tipo y color
+por si solos no establecen identidad. Los puntajes no son probabilidades.
+Las coincidencias historicas conservan su version; se usa semantic-v3 al recalcular.
+
+La validacion privada con fotos reales detecto limitaciones de clasificacion en
+vistas parciales y diferencias entre proveedores. El sistema sigue requiriendo
+revision humana; no debe usarse para adjudicar automaticamente la propiedad.
+Se necesitan vistas que permitan reconocer el objeto completo y sus detalles.
+Los datasets, resultados y credenciales de pruebas permanecen en build/ (ignorado).
+
+Pruebas de regresion: tests/test_matching_identity_safety.py. Las pruebas de
+PostgreSQL requieren TEST_DATABASE_URL apuntando a una base aislada cuyo nombre
+contenga _test; nunca usar la base productiva para esas pruebas.
+
+
+### Matching semantic-v4: calidad de la evidencia
+
+El comparador conserva requires_another_photo e image_quality del analisis
+persistido. Si cualquiera de los dos objetos requiere otra foto o tiene calidad
+mala, la coincidencia no puede ser alta, aunque sus rasgos genericos coincidan.
+Se conserva como posible cuando corresponde y se explica la necesidad de otra
+foto en las advertencias. Los reportes antiguos sin estos campos mantienen el
+comportamiento anterior; los datos malformados no se convierten implicitamente.
+Esto limita la confianza, no demuestra identidad ni mejora por si solo el ranking.
+Las decisiones historicas conservan su version y requieren recalculo explicito.
+
+Regresiones: tests/test_matching_photo_quality.py y prueba de propagacion con
+PostgreSQL en tests/test_matches_postgresql.py. La evaluacion publica RGB-D,
+sus fuentes, resultados originales y comparacion antes/despues se guardan solo
+en build/public-rgbd-eval, ignorado por Git. No redistribuir el dataset como parte
+del producto ni interpretar la disponibilidad publica como licencia comercial.
+
+
+### Revision visual de coincidencias
+
+`POST /api/v1/matches/{match_id}/visual-review` compara las dos fotografias de
+una coincidencia visible para el usuario autenticado. Requiere ambas fotos.
+OpenAI es el proveedor principal si asi esta configurado; Gemini se utiliza
+solo para los fallos recuperables habilitados por la configuracion.
+
+La respuesta incluye `comparison`, proveedor/modelo reales, version del prompt,
+indicador de respaldo y SHA-256 de ambas fotos. `consistent` significa que
+coinciden detalles visibles, `different` que existen diferencias incompatibles
+en partes comparables y `uncertain` que se necesita comprobar mas evidencia.
+Ninguno confirma propiedad ni es una probabilidad de identidad. Fotos pequenas,
+caras opuestas o evidencia generica no permiten afirmar identidad. Las dos
+vistas deben mostrar partes comparables antes de descartar una coincidencia.
+
+Las lecturas autorizadas terminan sus transacciones antes de invocar al proveedor.
+Se comprueban nuevamente permisos y fotos despues de la llamada. La cache es
+local al proceso, limitada a 128 resultados durante 15 minutos, con un maximo de
+2 comparaciones simultaneas por proceso y sin almacenar bytes de fotos. Una
+sustitucion de imagen invalida la asociacion mediante su hash. Los dictamenes no
+modifican puntajes, reclamaciones, aprobaciones ni entregas.
+
+En la app, abre una coincidencia y selecciona **Comparar fotos con IA**. La lista
+permite comparar hasta cinco candidatos por accion; las diferencias visibles se
+colocan al final de los resultados cargados. Un resultado incierto conserva el
+candidato para revision. La solicitud puede tardar mas que una lectura normal.
+Las evaluaciones y fotos de prueba se guardan en `build/`, excluido de Git.
+
+
+Antes de devolver `different`, una segunda llamada al mismo proveedor cuestiona
+la diferencia frente a cambios de angulo, caras opuestas y piezas removibles.
+Solo una diferencia confirmada por esa comprobacion conserva ese dictamen.
+Si la comprobacion falla o encuentra una explicacion alternativa, el candidato
+queda `uncertain`. El campo `verification` indica `not_needed`, `confirmed`,
+`unconfirmed` o `unavailable`. El presupuesto total de llamadas de una revision
+es como maximo 120 segundos, incluyendo respaldo y comprobacion.
+
+
+Al crear otra copia de trabajo, recrea el entorno virtual y las caches de
+compilacion: no reutilices `.venv`, `.dart_tool`, `build` ni `android/.gradle`
+entre directorios. Pueden contener ejecutables o listas de salidas con rutas
+absolutas de la ubicacion anterior. Genera un entorno nuevo e instala las
+dependencias; en Flutter ejecuta `flutter pub get` dentro de la copia.
+
+
+La revision `visual-pair-v5` distingue compatibilidad del diseno e identidad del
+ejemplar. `consistent` tambien puede indicar dos acuerdos estructurales
+especificos, aun cuando sean compartidos por un modelo de fabrica. El campo
+`structural_agreements` conserva esas observaciones; color, marca y categoria
+solos no bastan. Este resultado orienta la busqueda, no confirma propiedad.
+
+
+Al abrir el detalle de una coincidencia con ambas fotos, la app solicita la
+revision visual automaticamente. Reutiliza el resultado mientras coincidan
+los hashes de las imagenes y permite reintentar si el proveedor falla. Muestra
+los acuerdos estructurales por separado para explicar la compatibilidad.
+La reclamacion y el chat privado mantienen sus controles de autorizacion.
+
+## Chat en tiempo real
+
+Flutter envia mensajes por HTTP autenticado. PostgreSQL confirma y conserva el historial; despues el backend publica un aviso sin contenido privado en Redis Pub/Sub. WebSocket autentica el primer frame, verifica participantes y vuelve a comprobar acceso antes de cada aviso. El cliente recupera el historial autorizado por HTTP. Redis no almacena mensajes. Si falla, el chat mantiene reconciliacion HTTP y reconecta el socket. Configurar REDIS_URL; Redis debe estar en red privada, sin puerto publico. Caddy admite el upgrade WebSocket.

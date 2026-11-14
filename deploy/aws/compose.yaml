@@ -1,0 +1,60 @@
+name: encuentrau
+services:
+  redis:
+    image: redis:7.4-alpine
+    command: [redis-server, --maxmemory, 64mb, --maxmemory-policy, allkeys-lru, --save, "", --appendonly, "no"]
+    restart: unless-stopped
+    mem_limit: 128m
+    healthcheck:
+      test: [CMD, redis-cli, ping]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+  api:
+    image: ${BACKEND_IMAGE:?Set an immutable backend image tag}
+    env_file:
+      - path: ${RUNTIME_ENV_FILE:?Set the protected runtime env file path}
+        format: raw
+    environment:
+      REDIS_URL: redis://redis:6379/0
+      REPORT_IMAGE_STORAGE_PROVIDER: local
+      REPORT_IMAGE_STORAGE_PATH: /data/uploads
+    volumes:
+      - type: bind
+        source: ${UPLOADS_PATH:?Set the mounted EBS uploads directory}
+        target: /data/uploads
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${RDS_CA_FILE:?Set the RDS CA bundle path}
+        target: /certs/rds-ca.pem
+        read_only: true
+        bind:
+          create_host_path: false
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    logging:
+      driver: local
+      options: {max-size: 10m, max-file: "3"}
+  web:
+    image: ${WEB_IMAGE:?Set an immutable frontend image tag}
+    environment:
+      SITE_DOMAIN: ${SITE_DOMAIN:?Set the public domain}
+    ports: ["80:80", "443:443", "443:443/udp"]
+    volumes:
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+    logging:
+      driver: local
+      options: {max-size: 10m, max-file: "3"}
+volumes:
+  caddy_data:
+  caddy_config:

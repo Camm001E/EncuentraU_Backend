@@ -29,3 +29,7 @@ Thumbs.db
 # Private report photographs and local verification artifacts
 /var/
 /build/
+
+# Local deployment configuration
+/deploy/aws/runtime.env
+/deploy/aws/deployment.env
