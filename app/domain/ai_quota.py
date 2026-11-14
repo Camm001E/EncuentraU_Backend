@@ -1,7 +1,7 @@
 """Conservative provider-call allowances, using Colombia calendar boundaries."""
 
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from zoneinfo import ZoneInfo
 
 ANALYSIS_UNITS = 2  # Primary and possible fallback.
@@ -48,6 +48,6 @@ def quota_windows(user_id, now, settings):
         ),
     ]
     return [
-        QuotaWindow(scope, start.isoformat(), end.astimezone(timezone.utc), limit)
+        QuotaWindow(scope, start.isoformat(), end.astimezone(UTC), limit)
         for scope, start, end, limit in specs
     ]

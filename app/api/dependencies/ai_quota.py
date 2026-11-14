@@ -17,7 +17,8 @@ class AIQuotaGuard:
         except QuotaExceeded as exc:
             raise HTTPException(
                 429,
-                "Se alcanzó el límite de IA. Tus reportes y mensajes siguen disponibles. "
+                "Se alcanzó el límite de IA. "
+                "Tus reportes y mensajes siguen disponibles. "
                 "Intenta de nuevo cuando se renueve el cupo.",
                 headers={
                     "Retry-After": str(exc.retry_after),

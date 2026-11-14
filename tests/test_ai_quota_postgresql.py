@@ -25,7 +25,8 @@ def ledger():
     with engine.begin() as c:
         c.execute(
             text(
-                "CREATE TABLE ai_quota_counters (scope varchar(80), bucket varchar(40), "
+                "CREATE TABLE ai_quota_counters (scope varchar(80), "
+                "bucket varchar(40), "
                 "used integer NOT NULL DEFAULT 0 CHECK(used>=0), "
                 "expires_at timestamptz NOT NULL, PRIMARY KEY(scope,bucket))"
             )
@@ -100,7 +101,8 @@ def test_global_allowance_is_shared_between_accounts(ledger):
         assert (
             c.execute(
                 text(
-                    "SELECT count(*) FROM ai_quota_counters WHERE scope LIKE 'user:four:%'"
+                    "SELECT count(*) FROM ai_quota_counters "
+                    "WHERE scope LIKE 'user:four:%'"
                 )
             ).scalar_one()
             == 0
@@ -119,7 +121,9 @@ def test_obsolete_counter_cleanup_preserves_recent_history(ledger):
     with ledger.engine.begin() as c:
         c.execute(
             text(
-                "INSERT INTO ai_quota_counters VALUES ('old','old',2,now()-interval '45 days'),('recent','recent',2,now()-interval '1 day')"
+                "INSERT INTO ai_quota_counters VALUES "
+                "('old','old',2,now()-interval '45 days'),"
+                "('recent','recent',2,now()-interval '1 day')"
             )
         )
     ledger.reserve("one", 2)
