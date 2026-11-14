@@ -64,6 +64,11 @@ db = json.loads(
     ]
 )
 base = {
+    "AI_QUOTA_ENABLED": "true",
+    "AI_QUOTA_USER_HOUR": "6",
+    "AI_QUOTA_USER_DAY": "20",
+    "AI_QUOTA_GLOBAL_DAY": "120",
+    "AI_QUOTA_GLOBAL_MONTH": "1200",
     "AI_PRIMARY_PROVIDER": "openai",
     "AI_FALLBACK_PROVIDER": "gemini",
     "OPENAI_MODEL": "gpt-5.4",
