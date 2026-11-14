@@ -10,6 +10,11 @@ BACKEND_DIR = Path(__file__).resolve().parents[2]
 
 
 class Settings(BaseSettings):
+    ai_quota_enabled: bool = False
+    ai_quota_user_hour: int = Field(default=6, ge=3, le=1000)
+    ai_quota_user_day: int = Field(default=20, ge=3, le=10000)
+    ai_quota_global_day: int = Field(default=120, ge=3, le=100000)
+    ai_quota_global_month: int = Field(default=1200, ge=3, le=1000000)
     redis_url: SecretStr | None = Field(default=None, repr=False)
     app_name: str = "EncuentraU AI API"
     api_prefix: str = "/api/v1"
