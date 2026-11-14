@@ -323,7 +323,7 @@ def test_endpoint_provider_error_is_safe_and_not_mislabeled(reason, status):
     from app.infrastructure.gemini_image_analyzer import get_image_analyzer
     from app.main import app
 
-    app.dependency_overrides[get_current_user] = lambda: object()
+    app.dependency_overrides[get_current_user] = lambda: SimpleNamespace(id="test-user")
     provider = Mock()
     provider.analyze.side_effect = ImageAnalysisProviderError(reason)
     app.dependency_overrides[get_image_analyzer] = lambda: provider

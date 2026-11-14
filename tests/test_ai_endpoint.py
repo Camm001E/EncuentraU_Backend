@@ -1,3 +1,5 @@
+from types import SimpleNamespace
+
 from fastapi.testclient import TestClient
 
 from app.api.dependencies.authentication import get_current_user
@@ -45,7 +47,7 @@ def test_health_endpoint() -> None:
 
 
 def test_analyze_image_returns_structured_result() -> None:
-    app.dependency_overrides[get_current_user] = lambda: object()
+    app.dependency_overrides[get_current_user] = lambda: SimpleNamespace(id="test-user")
     app.dependency_overrides[get_image_analyzer] = lambda: FakeImageAnalyzer()
     try:
         response = client.post(
@@ -71,7 +73,7 @@ def test_analyze_image_returns_structured_result() -> None:
 
 
 def test_analyze_image_rejects_unsupported_file_type() -> None:
-    app.dependency_overrides[get_current_user] = lambda: object()
+    app.dependency_overrides[get_current_user] = lambda: SimpleNamespace(id="test-user")
     app.dependency_overrides[get_image_analyzer] = lambda: FakeImageAnalyzer()
     try:
         response = client.post(
@@ -87,7 +89,7 @@ def test_analyze_image_rejects_unsupported_file_type() -> None:
 
 
 def test_analyze_image_rejects_empty_file() -> None:
-    app.dependency_overrides[get_current_user] = lambda: object()
+    app.dependency_overrides[get_current_user] = lambda: SimpleNamespace(id="test-user")
     app.dependency_overrides[get_image_analyzer] = lambda: FakeImageAnalyzer()
     try:
         response = client.post(
