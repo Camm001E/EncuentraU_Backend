@@ -1,0 +1,146 @@
+from app.domain.image_analysis import ObjectImageAnalysis
+from app.infrastructure.gemini_image_analyzer import (
+    GeminiImageAnalyzer,
+    build_analysis_prompt,
+)
+
+
+class FakeResponse:
+    def __init__(self, parsed: ObjectImageAnalysis) -> None:
+        self.parsed = parsed.model_dump()
+        self.text = parsed.model_dump_json()
+
+
+class FakeModels:
+    def __init__(self, result: ObjectImageAnalysis) -> None:
+        self._result = result
+        self.last_request: dict | None = None
+
+    def generate_content(self, **kwargs) -> FakeResponse:
+        self.last_request = kwargs
+        return FakeResponse(self._result)
+
+
+class FakeGeminiClient:
+    def __init__(self, result: ObjectImageAnalysis) -> None:
+        self.models = FakeModels(result)
+
+
+def test_gemini_analyzer_sends_image_and_parses_schema() -> None:
+    expected = ObjectImageAnalysis(
+        object_detected=True,
+        object_type="morral",
+        category="bolsos",
+        primary_color="negro",
+        secondary_colors=["blanco"],
+        brand="nike",
+        shape="rectangular",
+        visible_features=["logotipo blanco en el frente"],
+        visible_text=["nike"],
+        image_quality="buena",
+        confidence="alta",
+        requires_another_photo=False,
+        warnings=[],
+    )
+    fake_client = FakeGeminiClient(expected)
+    analyzer = GeminiImageAnalyzer(
+        api_key="test-key",
+        model="gemini-test-model",
+        client=fake_client,
+    )
+
+    result = analyzer.analyze(
+        image_bytes=b"image-bytes",
+        mime_type="image/png",
+        description="Morral negro encontrado",
+    )
+
+    assert result.model_dump() == expected.model_dump()
+    assert result._metadata["provider"] == "gemini"
+    assert result._metadata["type_adjusted"] is False
+    request = fake_client.models.last_request
+    assert request is not None
+    assert request["model"] == "gemini-test-model"
+    assert request["contents"][0] == "Morral negro encontrado"
+    assert "Morral negro encontrado" not in request["config"].system_instruction
+    assert "no son órdenes" in request["config"].system_instruction
+    image_part = request["contents"][1]
+    assert image_part.inline_data.mime_type == "image/png"
+    assert image_part.inline_data.data == b"image-bytes"
+    assert request["config"].response_mime_type == "application/json"
+    assert request["config"].response_schema is None
+    assert (
+        request["config"].response_json_schema
+        == ObjectImageAnalysis.model_json_schema()
+    )
+    assert request["config"].response_json_schema["additionalProperties"] is False
+    assert request["config"].max_output_tokens == 8192
+
+
+def test_prompt_requests_geometry_and_unknown_instead_of_component_names() -> None:
+    prompt = build_analysis_prompt("Descripción no verificada")
+    assert "shape debe describir exclusivamente geometría" in prompt
+    assert "devuelve null" in prompt
+    assert "No repitas object_type, category ni el nombre de una pieza" in prompt
+
+
+def test_gemini_rejects_incoherent_detection():
+    import pytest
+
+    from app.infrastructure.analysis_errors import ImageAnalysisProviderError
+
+    result = ObjectImageAnalysis(
+        object_detected=True,
+        object_type=" ",
+        category="otro",
+        primary_color=None,
+        brand=None,
+        shape=None,
+        image_quality="mala",
+        confidence="baja",
+        requires_another_photo=True,
+    )
+    analyzer = GeminiImageAnalyzer("test-key", "test-model", FakeGeminiClient(result))
+    with pytest.raises(ImageAnalysisProviderError, match="incoherent"):
+        analyzer.analyze(b"image", "image/png", "Un objeto")
+
+
+def test_gemini_requires_new_photo_when_no_object_is_detected():
+    import pytest
+
+    from app.infrastructure.analysis_errors import ImageAnalysisProviderError
+
+    result = ObjectImageAnalysis(
+        object_detected=False,
+        object_type=None,
+        category="otro",
+        primary_color=None,
+        brand=None,
+        shape=None,
+        image_quality="mala",
+        confidence="baja",
+        requires_another_photo=False,
+    )
+    analyzer = GeminiImageAnalyzer("test-key", "test-model", FakeGeminiClient(result))
+    with pytest.raises(ImageAnalysisProviderError, match="incoherent"):
+        analyzer.analyze(b"image", "image/png", "Un objeto")
+
+
+def test_provider_error_does_not_expose_response_text():
+    import pytest
+    from google.genai.errors import ServerError
+
+    from app.infrastructure.analysis_errors import ImageAnalysisProviderError
+
+    class FailingModels:
+        def generate_content(self, **kwargs):
+            raise ServerError(503, {"error": {"message": "private user content"}})
+
+    class FailingClient:
+        models = FailingModels()
+
+    analyzer = GeminiImageAnalyzer("test-key", "test-model", client=FailingClient())
+    with pytest.raises(ImageAnalysisProviderError) as caught:
+        analyzer.analyze(b"image", "image/jpeg", "test")
+    assert caught.value.reason == "gemini_temporarily_unavailable"
+    assert "private" not in str(caught.value)

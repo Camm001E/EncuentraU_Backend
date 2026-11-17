@@ -1,0 +1,35 @@
+# Entorno virtual
+.venv/
+venv/
+
+# Variables y secretos
+.env
+.env.local
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# Pruebas y cobertura
+.coverage
+htmlcov/
+
+# Editores
+.vscode/
+.idea/
+
+# Archivos temporales
+*.log
+.DS_Store
+Thumbs.db
+
+# Private report photographs and local verification artifacts
+/var/
+/build/
+
+# Local deployment configuration
+/deploy/aws/runtime.env
+/deploy/aws/deployment.env

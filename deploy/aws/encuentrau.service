@@ -1,0 +1,19 @@
+[Unit]
+Description=EncuentraU application containers
+Requires=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
+RequiresMountsFor=/mnt/encuentrau
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+WorkingDirectory=/opt/encuentrau
+ExecStartPre=/usr/bin/mountpoint -q /mnt/encuentrau
+ExecStart=/usr/bin/docker compose --env-file deployment.env up -d --wait
+ExecStop=/usr/bin/docker compose --env-file deployment.env stop
+TimeoutStartSec=180
+TimeoutStopSec=90
+
+[Install]
+WantedBy=multi-user.target

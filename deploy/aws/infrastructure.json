@@ -1,0 +1,539 @@
+{
+  "AWSTemplateFormatVersion": "2010-09-09",
+  "Description": "EncuentraU small isolated deployment: EC2, private RDS and persistent photos. No Worknet resources.",
+  "Metadata": {
+    "AWSToolsMetrics": {
+      "AWSAgentToolkit": "aws-cloudformation@3"
+    }
+  },
+  "Parameters": {
+    "Vpc": {
+      "Type": "AWS::EC2::VPC::Id"
+    },
+    "SubnetA": {
+      "Type": "AWS::EC2::Subnet::Id"
+    },
+    "SubnetB": {
+      "Type": "AWS::EC2::Subnet::Id"
+    },
+    "Ami": {
+      "Type": "AWS::EC2::Image::Id"
+    }
+  },
+  "Resources": {
+    "Artifacts": {
+      "Type": "AWS::S3::Bucket",
+      "Properties": {
+        "PublicAccessBlockConfiguration": {
+          "BlockPublicAcls": true,
+          "IgnorePublicAcls": true,
+          "BlockPublicPolicy": true,
+          "RestrictPublicBuckets": true
+        },
+        "BucketEncryption": {
+          "ServerSideEncryptionConfiguration": [
+            {
+              "ServerSideEncryptionByDefault": {
+                "SSEAlgorithm": "AES256"
+              }
+            }
+          ]
+        },
+        "VersioningConfiguration": {
+          "Status": "Enabled"
+        },
+        "LifecycleConfiguration": {
+          "Rules": [
+            {
+              "Id": "ExpireArtifacts",
+              "Status": "Enabled",
+              "ExpirationInDays": 14,
+              "NoncurrentVersionExpiration": {
+                "NoncurrentDays": 7
+              },
+              "Prefix": "releases/"
+            },
+            {
+              "Id": "ExpireOldPhotoBackups",
+              "Status": "Enabled",
+              "Prefix": "backups/",
+              "NoncurrentVersionExpiration": {
+                "NoncurrentDays": 7
+              },
+              "AbortIncompleteMultipartUpload": {
+                "DaysAfterInitiation": 1
+              }
+            }
+          ]
+        }
+      },
+      "Metadata": {
+        "com.aws.cloudformation.Context": {
+          "why": "Private release artifacts and backups",
+          "must": [
+            "Keep deployment isolated to EncuentraU"
+          ]
+        }
+      },
+      "DeletionPolicy": "Retain",
+      "UpdateReplacePolicy": "Retain"
+    },
+    "ArtifactsPolicy": {
+      "Type": "AWS::S3::BucketPolicy",
+      "Properties": {
+        "Bucket": {
+          "Ref": "Artifacts"
+        },
+        "PolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Effect": "Deny",
+              "Principal": "*",
+              "Action": "s3:*",
+              "Resource": [
+                {
+                  "Fn::GetAtt": [
+                    "Artifacts",
+                    "Arn"
+                  ]
+                },
+                {
+                  "Fn::Sub": "${Artifacts.Arn}/*"
+                }
+              ],
+              "Condition": {
+                "Bool": {
+                  "aws:SecureTransport": "false"
+                }
+              }
+            }
+          ]
+        }
+      },
+      "Metadata": {
+        "com.aws.cloudformation.Context": {
+          "why": "Require encrypted transport",
+          "must": [
+            "Keep deployment isolated to EncuentraU"
+          ]
+        }
+      }
+    },
+    "WebSecurity": {
+      "Type": "AWS::EC2::SecurityGroup",
+      "Properties": {
+        "GroupDescription": "EncuentraU public HTTPS only",
+        "VpcId": {
+          "Ref": "Vpc"
+        },
+        "SecurityGroupIngress": [
+          {
+            "IpProtocol": "tcp",
+            "FromPort": 80,
+            "ToPort": 80,
+            "CidrIp": "0.0.0.0/0"
+          },
+          {
+            "IpProtocol": "tcp",
+            "FromPort": 443,
+            "ToPort": 443,
+            "CidrIp": "0.0.0.0/0"
+          }
+        ]
+      },
+      "Metadata": {
+        "com.aws.cloudformation.Context": {
+          "why": "Public web entry; no SSH or database ingress",
+          "must": [
+            "Keep deployment isolated to EncuentraU"
+          ]
+        }
+      }
+    },
+    "DbSecurity": {
+      "Type": "AWS::EC2::SecurityGroup",
+      "Properties": {
+        "GroupDescription": "EncuentraU private PostgreSQL",
+        "VpcId": {
+          "Ref": "Vpc"
+        },
+        "SecurityGroupIngress": [
+          {
+            "IpProtocol": "tcp",
+            "FromPort": 5432,
+            "ToPort": 5432,
+            "SourceSecurityGroupId": {
+              "Ref": "WebSecurity"
+            }
+          }
+        ]
+      },
+      "Metadata": {
+        "com.aws.cloudformation.Context": {
+          "why": "Database reachable only from app",
+          "must": [
+            "Keep deployment isolated to EncuentraU"
+          ]
+        }
+      }
+    },
+    "DbSubnets": {
+      "Type": "AWS::RDS::DBSubnetGroup",
+      "Properties": {
+        "DBSubnetGroupDescription": "EncuentraU isolated database placement",
+        "SubnetIds": [
+          {
+            "Ref": "SubnetA"
+          },
+          {
+            "Ref": "SubnetB"
+          }
+        ]
+      },
+      "Metadata": {
+        "com.aws.cloudformation.Context": {
+          "why": "Database across two available subnet zones",
+          "must": [
+            "Keep deployment isolated to EncuentraU"
+          ]
+        }
+      }
+    },
+    "Database": {
+      "Type": "AWS::RDS::DBInstance",
+      "Properties": {
+        "Engine": "postgres",
+        "DBInstanceClass": "db.t4g.micro",
+        "AllocatedStorage": "20",
+        "StorageType": "gp3",
+        "DBName": "encuentrau",
+        "MasterUsername": "euadmin",
+        "ManageMasterUserPassword": true,
+        "DBSubnetGroupName": {
+          "Ref": "DbSubnets"
+        },
+        "VPCSecurityGroups": [
+          {
+            "Ref": "DbSecurity"
+          }
+        ],
+        "PubliclyAccessible": false,
+        "StorageEncrypted": true,
+        "BackupRetentionPeriod": 1,
+        "DeletionProtection": true,
+        "MultiAZ": false,
+        "AutoMinorVersionUpgrade": true,
+        "CopyTagsToSnapshot": true,
+        "Tags": [
+          {
+            "Key": "Project",
+            "Value": "EncuentraU"
+          }
+        ]
+      },
+      "Metadata": {
+        "com.aws.cloudformation.Context": {
+          "why": "Small private database with backups; preserve client data",
+          "must": [
+            "Keep deployment isolated to EncuentraU"
+          ]
+        }
+      },
+      "DeletionPolicy": "Retain",
+      "UpdateReplacePolicy": "Retain"
+    },
+    "Role": {
+      "Type": "AWS::IAM::Role",
+      "Properties": {
+        "AssumeRolePolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "ec2.amazonaws.com"
+              },
+              "Action": "sts:AssumeRole"
+            }
+          ]
+        },
+        "ManagedPolicyArns": [
+          "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
+        ],
+        "Policies": [
+          {
+            "PolicyName": "ReleaseAndSecrets",
+            "PolicyDocument": {
+              "Version": "2012-10-17",
+              "Statement": [
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "s3:GetObject",
+                    "s3:PutObject"
+                  ],
+                  "Resource": {
+                    "Fn::Sub": "${Artifacts.Arn}/*"
+                  }
+                },
+                {
+                  "Effect": "Allow",
+                  "Action": "secretsmanager:GetSecretValue",
+                  "Resource": [
+                    {
+                      "Fn::GetAtt": [
+                        "Database",
+                        "MasterUserSecret.SecretArn"
+                      ]
+                    },
+                    {
+                      "Fn::Sub": "arn:${AWS::Partition}:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:encuentrau/*"
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "Metadata": {
+        "com.aws.cloudformation.Context": {
+          "why": "SSM administration and scoped release access",
+          "must": [
+            "Keep deployment isolated to EncuentraU"
+          ]
+        }
+      }
+    },
+    "Profile": {
+      "Type": "AWS::IAM::InstanceProfile",
+      "Properties": {
+        "Roles": [
+          {
+            "Ref": "Role"
+          }
+        ]
+      },
+      "Metadata": {
+        "com.aws.cloudformation.Context": {
+          "why": "Instance credentials without static AWS keys",
+          "must": [
+            "Keep deployment isolated to EncuentraU"
+          ]
+        }
+      }
+    },
+    "Launch": {
+      "Type": "AWS::EC2::LaunchTemplate",
+      "Properties": {
+        "LaunchTemplateData": {
+          "ImageId": {
+            "Ref": "Ami"
+          },
+          "InstanceType": "t3.small",
+          "IamInstanceProfile": {
+            "Name": {
+              "Ref": "Profile"
+            }
+          },
+          "MetadataOptions": {
+            "HttpTokens": "required",
+            "HttpPutResponseHopLimit": 2
+          },
+          "CreditSpecification": {
+            "CpuCredits": "standard"
+          },
+          "BlockDeviceMappings": [
+            {
+              "DeviceName": "/dev/xvda",
+              "Ebs": {
+                "VolumeSize": 20,
+                "VolumeType": "gp3",
+                "Encrypted": true,
+                "DeleteOnTermination": true
+              }
+            }
+          ],
+          "UserData": {
+            "Fn::Base64": "#!/bin/bash\nset -eu\ndnf install -y docker\nsystemctl enable --now docker\nsystemctl enable --now amazon-ssm-agent\n"
+          }
+        }
+      },
+      "Metadata": {
+        "com.aws.cloudformation.Context": {
+          "why": "Bounded CPU cost and no embedded secrets",
+          "must": [
+            "Keep deployment isolated to EncuentraU"
+          ]
+        }
+      }
+    },
+    "Server": {
+      "Type": "AWS::EC2::Instance",
+      "Properties": {
+        "LaunchTemplate": {
+          "LaunchTemplateId": {
+            "Ref": "Launch"
+          },
+          "Version": {
+            "Fn::GetAtt": [
+              "Launch",
+              "LatestVersionNumber"
+            ]
+          }
+        },
+        "SubnetId": {
+          "Ref": "SubnetA"
+        },
+        "SecurityGroupIds": [
+          {
+            "Ref": "WebSecurity"
+          }
+        ],
+        "Tags": [
+          {
+            "Key": "Name",
+            "Value": "EncuentraU"
+          },
+          {
+            "Key": "Project",
+            "Value": "EncuentraU"
+          }
+        ]
+      },
+      "Metadata": {
+        "com.aws.cloudformation.Context": {
+          "why": "Single app host; resize only after measured load",
+          "must": [
+            "Keep deployment isolated to EncuentraU"
+          ]
+        }
+      }
+    },
+    "Address": {
+      "Type": "AWS::EC2::EIP",
+      "Properties": {
+        "Domain": "vpc"
+      },
+      "Metadata": {
+        "com.aws.cloudformation.Context": {
+          "why": "Stable address for HTTPS",
+          "must": [
+            "Keep deployment isolated to EncuentraU"
+          ]
+        }
+      }
+    },
+    "AddressLink": {
+      "Type": "AWS::EC2::EIPAssociation",
+      "Properties": {
+        "InstanceId": {
+          "Ref": "Server"
+        },
+        "AllocationId": {
+          "Fn::GetAtt": [
+            "Address",
+            "AllocationId"
+          ]
+        }
+      },
+      "Metadata": {
+        "com.aws.cloudformation.Context": {
+          "why": "Bind stable address to app",
+          "must": [
+            "Keep deployment isolated to EncuentraU"
+          ]
+        }
+      }
+    },
+    "Uploads": {
+      "Type": "AWS::EC2::Volume",
+      "Properties": {
+        "AvailabilityZone": {
+          "Fn::GetAtt": [
+            "Server",
+            "AvailabilityZone"
+          ]
+        },
+        "Encrypted": true,
+        "Size": 20,
+        "VolumeType": "gp3",
+        "Tags": [
+          {
+            "Key": "Project",
+            "Value": "EncuentraU"
+          }
+        ]
+      },
+      "Metadata": {
+        "com.aws.cloudformation.Context": {
+          "why": "Private photos survive container and instance replacement",
+          "must": [
+            "Keep deployment isolated to EncuentraU"
+          ]
+        }
+      },
+      "DeletionPolicy": "Retain",
+      "UpdateReplacePolicy": "Retain"
+    },
+    "UploadsLink": {
+      "Type": "AWS::EC2::VolumeAttachment",
+      "Properties": {
+        "Device": "/dev/sdf",
+        "InstanceId": {
+          "Ref": "Server"
+        },
+        "VolumeId": {
+          "Ref": "Uploads"
+        }
+      },
+      "Metadata": {
+        "com.aws.cloudformation.Context": {
+          "why": "Attach persistent photos volume",
+          "must": [
+            "Keep deployment isolated to EncuentraU"
+          ]
+        }
+      }
+    }
+  },
+  "Outputs": {
+    "Instance": {
+      "Value": {
+        "Ref": "Server"
+      }
+    },
+    "PublicIp": {
+      "Value": {
+        "Ref": "Address"
+      }
+    },
+    "Bucket": {
+      "Value": {
+        "Ref": "Artifacts"
+      }
+    },
+    "DbEndpoint": {
+      "Value": {
+        "Fn::GetAtt": [
+          "Database",
+          "Endpoint.Address"
+        ]
+      }
+    },
+    "DbSecret": {
+      "Value": {
+        "Fn::GetAtt": [
+          "Database",
+          "MasterUserSecret.SecretArn"
+        ]
+      }
+    },
+    "DataVolume": {
+      "Value": {
+        "Ref": "Uploads"
+      }
+    }
+  }
+}

@@ -1,0 +1,102 @@
+from functools import lru_cache
+from pathlib import Path
+from typing import Literal
+from urllib.parse import urlsplit
+
+from pydantic import Field, SecretStr, field_validator
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+BACKEND_DIR = Path(__file__).resolve().parents[2]
+
+
+class Settings(BaseSettings):
+    email_verification_required: bool = False
+    email_sender: SecretStr | None = Field(default=None, repr=False)
+    email_aws_region: str = "us-east-2"
+    email_daily_limit: int = Field(default=40, ge=1, le=200)
+    ai_quota_enabled: bool = False
+    ai_quota_user_hour: int = Field(default=6, ge=3, le=1000)
+    ai_quota_user_day: int = Field(default=20, ge=3, le=10000)
+    ai_quota_global_day: int = Field(default=120, ge=3, le=100000)
+    ai_quota_global_month: int = Field(default=1200, ge=3, le=1000000)
+    redis_url: SecretStr | None = Field(default=None, repr=False)
+    app_name: str = "EncuentraU AI API"
+    api_prefix: str = "/api/v1"
+    gemini_api_key: SecretStr | None = None
+    gemini_model: str = "gemini-3.5-flash"
+    openai_api_key: SecretStr | None = Field(default=None, repr=False)
+    openai_model: str = Field(default="gpt-5.4-mini", min_length=1, max_length=100)
+    openai_reasoning_effort: Literal["none", "low", "medium", "high", "xhigh"] = "high"
+    openai_max_output_tokens: int = Field(default=8192, ge=1024, le=32768)
+    ai_primary_provider: Literal["openai", "gemini"] = "gemini"
+    ai_fallback_provider: Literal["none", "gemini"] = "none"
+    ai_timeout_seconds: float = Field(default=60, gt=0, le=120)
+    max_image_size_mb: int = 10
+    cors_origins: str = "http://localhost:3000,http://localhost:8080"
+    database_url: SecretStr | None = Field(default=None, repr=False)
+    jwt_secret_key: SecretStr | None = Field(default=None, repr=False)
+    jwt_algorithm: Literal["HS256"] = "HS256"
+    access_token_expire_minutes: int = Field(default=60, gt=0)
+    report_image_storage_provider: Literal["local"] = "local"
+    report_image_storage_path: Path = Path("var/uploads")
+    report_image_max_bytes: int = Field(default=8_388_608, gt=0, le=32_000_000)
+
+    @property
+    def report_image_directory(self) -> Path:
+        path = self.report_image_storage_path
+        return path if path.is_absolute() else BACKEND_DIR / path
+
+    model_config = SettingsConfigDict(
+        env_file=BACKEND_DIR / ".env",
+        env_file_encoding="utf-8",
+        extra="ignore",
+        hide_input_in_errors=True,
+    )
+
+    @field_validator("jwt_secret_key")
+    @classmethod
+    def validate_jwt_secret_key(cls, value: SecretStr | None) -> SecretStr | None:
+        if value is None or not value.get_secret_value().strip():
+            return None
+        if len(value.get_secret_value().encode("utf-8")) < 32:
+            raise ValueError("JWT_SECRET_KEY debe contener al menos 32 bytes.")
+        return value
+
+    @field_validator("database_url")
+    @classmethod
+    def validate_database_url(cls, value: SecretStr | None) -> SecretStr | None:
+        if value is None:
+            return None
+        raw = value.get_secret_value().strip()
+        if not raw:
+            return None
+        try:
+            parsed = urlsplit(raw)
+            valid = (
+                parsed.scheme in {"postgresql", "postgresql+psycopg"}
+                and parsed.hostname
+                and parsed.path.strip("/")
+                and not parsed.fragment
+            )
+            _ = parsed.port  # Validate without including its input in errors.
+        except ValueError:
+            valid = False
+        if not valid:
+            raise ValueError(
+                "DATABASE_URL debe ser una URL PostgreSQL válida."
+            ) from None
+        return SecretStr(raw)
+
+    @property
+    def max_image_size_bytes(self) -> int:
+        return self.max_image_size_mb * 1024 * 1024
+
+    @property
+    def cors_origin_list(self) -> list[str]:
+        origins = [origin.strip() for origin in self.cors_origins.split(",")]
+        return [origin for origin in origins if origin]
+
+
+@lru_cache
+def get_settings() -> Settings:
+    return Settings()
